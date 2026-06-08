@@ -1,0 +1,29 @@
+/**
+ * @name Template rendering with autoescape=False
+ * @description Disabling autoescape in template engines allows XSS attacks \
+ * when template content includes untrusted data.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 7.8
+ * @precision medium
+ * @id py/insecure-autoescape-false{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call
+where
+  (
+    call = API::moduleImport("jinja2").getMember(["Environment", "Template"]).getACall()
+    or
+    call = API::moduleImport("flask").getMember(["render_template_string"]).getACall()
+  ) and
+  call.getKeywordParameter("autoescape")
+      .getAValueReachingSink()
+      .asExpr()
+      .(ImmutableLiteral)
+      .booleanValue() = false
+select call, "Template rendering with autoescape=False disables HTML escaping, allowing XSS attacks."

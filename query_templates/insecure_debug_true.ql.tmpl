@@ -1,0 +1,29 @@
+/**
+ * @name Active debug code / debug mode enabled
+ * @description Enabling debug mode in production exposes sensitive information \
+ * (stack traces, environment variables, config) that aids attackers.
+ * @kind problem
+ * @problem.severity warning
+ * @security-severity 5.3
+ * @precision medium
+ * @id py/insecure-debug-true{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call
+where
+  (
+    call = API::moduleImport("flask").getMember(["Flask"]).getACall()
+    or
+    call = API::moduleImport("django.conf").getMember(["settings"]).getACall()
+  ) and
+  call.getKeywordParameter("debug")
+      .getAValueReachingSink()
+      .asExpr()
+      .(ImmutableLiteral)
+      .booleanValue() = true
+select call, "Debug mode is enabled, which exposes sensitive information in error messages and tracebacks."

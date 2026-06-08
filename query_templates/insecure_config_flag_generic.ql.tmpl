@@ -1,0 +1,21 @@
+/**
+ * @name Insecure configuration flag (generic)
+ * @description Detects calls with insecure configuration flags. Parameters \
+ * are injected by the run_insecure_config_flag_query tool.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 7.0
+ * @precision medium
+ * @id py/insecure-config-flag{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call
+where
+  {{MODULE_MEMBER_CHAIN}} and
+  {{PARAM_CONDITION}}
+select call, "{{MESSAGE}}"

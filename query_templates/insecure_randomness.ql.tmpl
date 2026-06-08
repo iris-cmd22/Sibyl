@@ -1,0 +1,23 @@
+/**
+ * @name Use of insufficiently random values
+ * @description Using non-cryptographic random sources (random.random, random.randint) \
+ * for security-critical data (tokens, nonces, keys) allows attackers to predict values.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 7.5
+ * @precision high
+ * @id py/insecure-randomness{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call, string func
+where
+  call = API::moduleImport("random").getMember([
+    "random", "randint", "choice", "randrange", "uniform", "betavariate"
+  ]).getACall() and
+  func = call.getFunction().(DataFlow::AttrRead).getAttributeName()
+select call, "Use of non-cryptographic random source " + func + "(). Use secrets.token_* or os.urandom() instead."

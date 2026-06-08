@@ -1,0 +1,33 @@
+/**
+ * @name Request with disabled certificate validation (verify=False)
+ * @description Disabling SSL/TLS certificate validation in HTTP requests \
+ * allows man-in-the-middle attacks. This flag should always be True in production.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 7.5
+ * @precision high
+ * @id py/insecure-verify-false
+ * @tags security
+ *       external/cwe/cwe-295
+ *       {{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call
+where
+  call = API::moduleImport("requests").getMember([
+    "get", "post", "put", "patch", "delete", "head", "options", "request"
+  ]).getACall() and
+  (
+    not exists(call.getArgByName("verify"))
+    or
+    call.getKeywordParameter("verify")
+        .getAValueReachingSink()
+        .asExpr()
+        .(ImmutableLiteral)
+        .booleanValue() = false
+  )
+select call, "This HTTP request disables SSL/TLS certificate validation with verify=False. {{CWE_ID_SUFFIX}}"

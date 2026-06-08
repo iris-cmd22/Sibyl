@@ -1,0 +1,21 @@
+/**
+ * @name Use of weak cryptographic hashing algorithm
+ * @description Using weak hash algorithms (MD5, SHA1) for security-critical \
+ * operations allows attackers to forge hashes.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 7.5
+ * @precision high
+ * @id py/insecure-weak-hash{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call, string algo
+where
+  call = API::moduleImport("hashlib").getMember(["md5", "sha1"]).getACall() and
+  algo = call.getFunction().(DataFlow::AttrRead).getAttributeName()
+select call, "Use of weak hash algorithm " + algo + " for security-critical data. Use SHA256 or stronger."

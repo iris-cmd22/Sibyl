@@ -1,0 +1,26 @@
+# --- Local config (machine-specific paths, secrets) ---
+.env
+.env.*
+
+# --- Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# --- uv ---
+# keep uv.lock committed; ignore nothing extra
+
+# --- Generated CodeQL artifacts (rigenerabili, contengono path assoluti) ---
+_work/
+reports/
+*.sarif
+
+# --- Generated queries (rese a runtime); keep only the qlpack manifest ---
+generated_queries/*.ql
+!generated_queries/qlpack.yml
+
+# --- Run logs / smoke outputs ---
+*.log
+_smoketest_report.md

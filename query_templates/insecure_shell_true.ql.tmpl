@@ -1,0 +1,27 @@
+/**
+ * @name OS command execution with shell=True
+ * @description Using shell=True with subprocess allows shell metacharacter \
+ * injection, enabling OS command injection attacks.
+ * @kind problem
+ * @problem.severity error
+ * @security-severity 8.0
+ * @precision high
+ * @id py/insecure-shell-true{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+from API::CallNode call
+where
+  call = API::moduleImport("subprocess").getMember([
+    "run", "call", "Popen", "check_call", "check_output"
+  ]).getACall() and
+  call.getKeywordParameter("shell")
+      .getAValueReachingSink()
+      .asExpr()
+      .(ImmutableLiteral)
+      .booleanValue() = true
+select call, "This subprocess call enables shell interpretation with shell=True, which is vulnerable to command injection."

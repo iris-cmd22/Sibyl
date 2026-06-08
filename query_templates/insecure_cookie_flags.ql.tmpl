@@ -1,0 +1,38 @@
+/**
+ * @name Insecure cookie configuration
+ * @description Cookies set without the secure or httponly flag, or with \
+ * samesite=None, are vulnerable to interception, JavaScript access, or CSRF.
+ * @kind problem
+ * @problem.severity warning
+ * @security-severity 6.5
+ * @precision medium
+ * @id py/insecure-cookie-flags{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.ApiGraphs
+
+/** A call to a `set_cookie(...)` method (e.g. on a Flask/Django response). */
+private predicate isSetCookieCall(DataFlow::CallCfgNode call) {
+  call.getFunction().(DataFlow::AttrRead).getAttributeName() = "set_cookie"
+}
+
+from DataFlow::CallCfgNode call, string flag
+where
+  isSetCookieCall(call) and
+  (
+    flag = "secure=False" and
+    call.getArgByName("secure").asExpr().(ImmutableLiteral).booleanValue() = false
+    or
+    flag = "httponly=False" and
+    call.getArgByName("httponly").asExpr().(ImmutableLiteral).booleanValue() = false
+    or
+    flag = "samesite=None" and
+    exists(StringLiteral s |
+      s = call.getArgByName("samesite").asExpr() and
+      s.getText().toLowerCase() in ["'none'", "\"none\""]
+    )
+  )
+select call, "Cookie set with insecure flag (" + flag + "), vulnerable to interception/CSRF/XSS."

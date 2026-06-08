@@ -1,0 +1,4 @@
+name: agent/generated-queries
+version: 0.0.0
+dependencies:
+  codeql/python-all: "*"
