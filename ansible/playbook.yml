@@ -1,0 +1,67 @@
+---
+- name: Deploy Sibyl MCP Server
+  hosts: mcp_servers
+  become: true
+  become_flags: '-S -H'  # -S forza la lettura della password da stdin, -H pulisce l'ambiente
+  vars:
+    install_dir: /opt/sibyl
+    venv_path: "{{ install_dir }}/.venv"
+
+  tasks:
+    - name: Aggiorna cache apt e installa dipendenze base
+      apt:
+        name: [python3, python3-venv, python3-pip]
+        state: present
+        update_cache: yes
+
+    - name: Crea struttura directory
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ install_dir }}"
+        - /var/log/sibyl
+
+    - name: Copia il codice sorgente
+      copy:
+        src: ../mcp_server/
+        dest: "{{ install_dir }}/mcp_server/"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Crea ambiente virtuale
+      command: python3 -m venv "{{ venv_path }}"
+      args:
+        creates: "{{ venv_path }}"
+
+    - name: Installa dipendenze
+      pip:
+        requirements: "{{ install_dir }}/mcp_server/requirements.txt"
+        virtualenv: "{{ venv_path }}"
+
+    - name: Crea servizio systemd per persistenza
+      copy:
+        dest: /etc/systemd/system/sibyl.service
+        content: |
+          [Unit]
+          Description=Sibyl MCP Server
+          After=network.target
+
+          [Service]
+          ExecStart={{ venv_path }}/bin/python3 {{ install_dir }}/mcp_server/server.py
+          WorkingDirectory={{ install_dir }}
+          Restart=always
+          User=root
+          Environment=PYTHONUNBUFFERED=1
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Abilita e avvia il servizio
+      systemd:
+        name: sibyl
+        enabled: yes
+        state: restarted
+        daemon_reload: yes

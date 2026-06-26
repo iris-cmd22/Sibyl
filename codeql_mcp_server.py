@@ -34,6 +34,10 @@ def _run(cmd: list[str], timeout: int = config.CODEQL_TIMEOUT) -> tuple[int, str
     return proc.returncode, proc.stdout, proc.stderr
 
 
+
+
+
+
 def _db_path_for(repo_path: str) -> Path:
     """Deterministic DB path per repo, so re-runs reuse the same slot."""
     digest = hashlib.sha1(str(Path(repo_path).resolve()).encode()).hexdigest()[:10]

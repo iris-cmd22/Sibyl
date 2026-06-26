@@ -24,3 +24,5 @@ generated_queries/*.ql
 # --- Run logs / smoke outputs ---
 *.log
 _smoketest_report.md
+.venv/
+__pycache__/
