@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-import config
+# Bundled knowledge data lives inside the server package.
+CWE_WIKI_PATH = Path(__file__).resolve().parent / "server" / "knowledge" / "data" / "cwe_wiki.json"
 
 # CWE -> dedicated check_insecure_* tool (mirrors INSECURE_CONFIG_FLAG_TEMPLATES
-# in codeql_mcp_server.py). Keep in sync when adding insecure_config_flag CWEs.
+# in server/registry/loader.py). Keep in sync when adding insecure_config_flag CWEs.
 INSECURE_CONFIG_TOOLS = {
     "CWE-295": "check_insecure_verify_false",
     "CWE-78": "check_insecure_shell_true",
@@ -117,17 +119,17 @@ def build_actions(cid: str, e: dict) -> dict:
 
 def main(argv: list[str]) -> int:
     force = "--force" in argv
-    wiki = json.loads(config.CWE_WIKI_PATH.read_text(encoding="utf-8"))
+    wiki = json.loads(CWE_WIKI_PATH.read_text(encoding="utf-8"))
     changed = 0
     for cid, e in wiki.items():
         if force or "actions" not in e:
             e["actions"] = build_actions(cid, e)
             changed += 1
             print(f"  {'~' if force else '+'} {cid}: actions {'regenerated' if force else 'added'}")
-    config.CWE_WIKI_PATH.write_text(
+    CWE_WIKI_PATH.write_text(
         json.dumps(wiki, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"Updated actions for {changed}/{len(wiki)} CWEs in {config.CWE_WIKI_PATH}")
+    print(f"Updated actions for {changed}/{len(wiki)} CWEs in {CWE_WIKI_PATH}")
     return 0
 
 

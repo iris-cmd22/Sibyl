@@ -54,7 +54,7 @@ CUSTOM_QUERY_DIR = Path(
 )
 
 # Registry: friendly key -> (CWE, human name, query filename in CUSTOM_QUERY_DIR).
-# Each entry becomes a dedicated MCP tool (see codeql_mcp_server.py).
+# Each entry becomes a dedicated MCP tool (see server/registry/loader.py).
 CUSTOM_QUERIES = {
     "sql_injection": ("CWE-89", "SQL injection (remote -> DB)", "RemoteToDbBroad.ql"),
     "os_command_injection": ("CWE-78", "OS command injection", "RemoteToOsCommandBroad.ql"),

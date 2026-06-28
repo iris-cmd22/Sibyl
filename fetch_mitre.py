@@ -23,8 +23,10 @@ from __future__ import annotations
 import json
 import sys
 import urllib.request
+from pathlib import Path
 
-import config
+# Bundled knowledge data lives inside the server package.
+CWE_WIKI_PATH = Path(__file__).resolve().parent / "server" / "knowledge" / "data" / "cwe_wiki.json"
 
 API = "https://cwe-api.mitre.org/api/v1/cwe/weakness/"
 
@@ -108,7 +110,7 @@ def main(argv: list[str]) -> int:
             print("ERROR: --xml requires a path to cwec_latest.xml", file=sys.stderr)
             return 1
 
-    wiki = json.loads(config.CWE_WIKI_PATH.read_text(encoding="utf-8"))
+    wiki = json.loads(CWE_WIKI_PATH.read_text(encoding="utf-8"))
     targets = args or list(wiki.keys())
     targets = [t if t.upper().startswith("CWE-") else f"CWE-{t}" for t in targets]
 
@@ -146,10 +148,10 @@ def main(argv: list[str]) -> int:
         updated += 1
         print(f"  + {cid}: {w.get('Name','')}")
 
-    config.CWE_WIKI_PATH.write_text(
+    CWE_WIKI_PATH.write_text(
         json.dumps(wiki, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"Enriched {updated}/{len(targets)} CWEs into {config.CWE_WIKI_PATH}")
+    print(f"Enriched {updated}/{len(targets)} CWEs into {CWE_WIKI_PATH}")
     return 0
 
 

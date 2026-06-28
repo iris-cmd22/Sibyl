@@ -18,8 +18,9 @@ reports/
 *.sarif
 
 # --- Generated queries (rese a runtime); keep only the qlpack manifest ---
-generated_queries/*.ql
-!generated_queries/qlpack.yml
+# Match in qualsiasi posizione (root storica e server/generated_queries/).
+**/generated_queries/*.ql
+!**/generated_queries/qlpack.yml
 
 # --- Run logs / smoke outputs ---
 *.log
