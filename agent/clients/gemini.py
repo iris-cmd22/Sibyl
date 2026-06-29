@@ -29,6 +29,16 @@ def _retry_delay(exc, default: float = 30.0) -> float:
     return default
 
 
+# Obiettivo: capire se un errore 429 è dovuto alla quota GIORNALIERA (non recuperabile
+#            aspettando) invece che al limite al minuto.
+# Input:    exc = l'eccezione RateLimitError.
+# Output:   True se è una quota per-giorno; False altrimenti.
+# Come realizzato: cerca nel messaggio i marcatori della quota giornaliera di Google.
+def _is_daily_quota(exc) -> bool:
+    t = str(exc)
+    return "PerDay" in t or "RequestsPerDay" in t or "per day" in t.lower()
+
+
 # Obiettivo: tradurre i messaggi nel formato "canonico" dell'agente verso il formato
 #            chat di OpenAI (richiesto dall'endpoint compatibile di Gemini).
 # Input:    messages = lista di messaggi dell'agente (system/user/assistant/tool).
@@ -126,6 +136,12 @@ class GeminiChat:
                 break
             except RateLimitError as e:   # free tier quota: wait and retry
                 last_exc = e
+                if _is_daily_quota(e):
+                    # A daily cap won't clear by waiting: fail fast with guidance.
+                    print("[gemini] quota GIORNALIERA del free tier esaurita per "
+                          f"'{self.model}'. Cambia GEMINI_MODEL (es. gemini-2.0-flash) "
+                          "o attiva il billing.", file=sys.stderr, flush=True)
+                    raise
                 delay = _retry_delay(e)
                 print(f"[gemini] rate limited (429), waiting {delay:.0f}s "
                       f"(attempt {attempt + 1}/6)", file=sys.stderr, flush=True)
