@@ -96,7 +96,8 @@ param_name, insecure_value, cwe)`.
 ## Setup
 
 Un solo file **`.env`** nella root serve sia al server sia all'agente (entrambi lo
-caricano). Le tre variabili CodeQL sono **obbligatorie**.
+caricano). Le tre variabili CodeQL sono **obbligatorie**. Parti da `.env.example`
+(`cp .env.example .env`, su Windows `copy .env.example .env`) e adatta i percorsi.
 
 ### Ubuntu / Linux
 
