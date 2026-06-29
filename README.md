@@ -94,9 +94,11 @@ CODEQL_BIN=codeql
 
 ## Uso
 
+L'agente è un CLIENT del server MCP: avvia prima il server
+(`MCP_TRANSPORT=sse python -m server`), poi l'agente.
+
 ```powershell
-uv run python agent.py "C:\path\alla\repo"
-#   oppure: python agent.py "C:\path\alla\repo"
+python -m agent "C:\path\alla\repo"
 # opzioni: --model qwen2.5-coder:7b   --max-steps 30   --resume   --report path.md
 ```
 
@@ -108,20 +110,20 @@ ma non è necessario. Database CodeQL e SARIF intermedi finiscono in `_work/`.
 Esempio sugli insecure config flag (repo di prova con tutti i pattern):
 
 ```powershell
-python agent.py _insecure_config_testrepo
+python -m agent _insecure_config_testrepo
 ```
 
 ## Estendere: aggiungere un template
 
 1. Scrivi `query_templates/<nome>.ql.tmpl` con placeholder `{{CWE_ID_SUFFIX}}` /
    `{{CWE_TAG_LINE}}` (più gli eventuali segnaposto specifici).
-2. Registra il tool in `codeql_mcp_server.py`
-   (per gli insecure config flag basta una voce in `INSECURE_CONFIG_FLAG_TEMPLATES`,
-   il tool `check_insecure_<key>` viene generato in automatico).
+2. Registra il tool nel server (per gli insecure config flag basta una voce in
+   `INSECURE_CONFIG_FLAG_TEMPLATES`, il tool `check_insecure_<key>` viene generato
+   in automatico da `server/registry/loader.py`).
 3. Valida con `codeql query compile`.
-4. Aggiungi la voce a `knowledge/cwe_wiki.json` (con `detection` e `actions`).
+4. Aggiungi la voce a `server/knowledge/cwe_wiki.json` (con `detection` e `actions`).
 5. `python build_actions.py` per rigenerare/completare le azioni.
-6. Aggiungi i test in `tests_agent.py` (compile + integrazione).
+6. Aggiungi i test in `server/tests/test_server.py` (compile + integrazione).
 
 ## Test
 

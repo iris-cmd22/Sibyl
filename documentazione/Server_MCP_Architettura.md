@@ -530,9 +530,10 @@ flowchart LR
   **non funzionanti**: i file `.ql` corrispondenti non esistono (mai creati). La
   stessa copertura è comunque ottenibile con `run_taint_query`. Decisione attuale:
   lasciarli così, li scriveremo in futuro se servirà.
-- L'**agente** (`agent.py`) non è ancora ricollegato al nuovo server: era
-  agganciato al vecchio file `codeql_mcp_server.py`, ora eliminato. È un lavoro
-  pianificato per la fase successiva.
+- L'**agente** è stato rifattorizzato nel pacchetto modulare `agent/` (vedi
+  `agent/COMPONENTI.md`) e ricollegato al nuovo server come **client SSE**: si
+  avvia con `python -m agent <repo>` mentre il server gira separatamente
+  (`MCP_TRANSPORT=sse python -m server`).
 
 ---
 
@@ -903,3 +904,298 @@ flowchart TB
 byte-identico: stesso template + stesse sostituzioni -> stesso contenuto -> stesso
 hash -> stesso nome file generato. Il `core/` resta puro (l'helper usa solo `config`
 e `template`, niente knowledge/MCP).
+
+## D: Setup completo di un server "vergine" (da zero)
+
+Procedura reale per installare e validare il MCP server su un server Ubuntu x86_64
+appena creato. Prerequisiti già presenti nel nostro caso: **Ollama + qwen** e accesso
+**SSH**. Sostituisci i path se usi cartelle diverse (`~/codeql-tools`, `~/Sibyl`).
+
+**Note/attenzioni emerse sul campo:**
+- Python molto recente (es. 3.14): se `pip install` fallisce per mancanza di wheel,
+  usa un venv con Python 3.12/3.13.
+- Il modello può essere una taglia piccola (es. `qwen2.5-coder:3b`): ok per far
+  girare il server; rileva solo per il futuro aggancio dell'agent.
+- Servono ~2 GB liberi per il toolchain CodeQL.
+
+### Fase 1 — Pre-flight (sul server)
+```bash
+uname -m            # atteso: x86_64
+python3 --version   # 3.10+
+git --version
+ollama list         # deve mostrare il modello qwen
+df -h ~             # spazio libero (>= 2-3 GB)
+```
+
+### Fase 2 — Toolchain CodeQL (da zero)
+```bash
+sudo apt-get update -y && sudo apt-get install -y unzip wget git
+mkdir -p ~/codeql-tools && cd ~/codeql-tools
+
+# CLI CodeQL (fissa una versione nota, es. 2.25.2)
+wget -q https://github.com/github/codeql-cli-binaries/releases/download/v2.25.2/codeql-linux64.zip
+unzip -q codeql-linux64.zip && rm codeql-linux64.zip       # -> ~/codeql-tools/codeql/codeql
+./codeql/codeql version
+
+# Libreria standard + suite + cartella custom (shallow per risparmiare disco)
+git clone --depth 1 --recursive --shallow-submodules https://github.com/github/vscode-codeql-starter.git
+ls vscode-codeql-starter/ql/python/ql/src/codeql-suites/python-security-extended.qls
+```
+
+### Fase 3 — Codice dell'app (repo privato)
+GitHub non accetta la password su HTTPS. Tre modi per autenticarsi (NON copiare la
+chiave privata sul server):
+
+- **SSH agent forwarding** (usa la chiave del tuo PC, niente da copiare): dal PC
+  `ssh -A <user>@<host>`, poi sul server `ssh -T git@github.com` (accetta) e
+  `git clone git@github.com:<owner>/<repo>.git ~/Sibyl`.
+- **Chiave SSH dedicata sul server** (comoda per i pull futuri):
+  `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`, aggiungi la `.pub` su GitHub
+  (Settings -> SSH keys), poi clona con l'URL `git@github.com:...`.
+- **Personal Access Token**: clone HTTPS usando il token come password.
+
+```bash
+cd ~/Sibyl && git checkout peppe
+```
+
+### Fase 4 — Ambiente Python
+```bash
+cd ~/Sibyl
+python3 -m venv .venv && source .venv/bin/activate
+pip install -U pip
+pip install -r server/requirements.txt pytest
+```
+
+### Fase 5 — File `.env` (path del server)
+```bash
+cat > ~/Sibyl/.env <<EOF
+CODEQL_BIN=$HOME/codeql-tools/codeql/codeql
+CODEQL_SEARCH_PATH=$HOME/codeql-tools/vscode-codeql-starter/ql
+CODEQL_SUITE=$HOME/codeql-tools/vscode-codeql-starter/ql/python/ql/src/codeql-suites/python-security-extended.qls
+CUSTOM_QUERY_DIR=$HOME/codeql-tools/vscode-codeql-starter/codeql-custom-queries-python
+EOF
+```
+
+### Fase 6 — Validazione
+```bash
+cd ~/Sibyl && source .venv/bin/activate
+python -m server                                   # banner: "tools registered: 26" (Ctrl-C)
+python -m pytest server/tests/test_server.py -q    # atteso: 34 passed (~2-3 min)
+ollama list
+```
+Successo = banner ok + **34 test verdi** sul server.
+
+## D: Quando ha senso esporre il MCP server in rete?
+
+Principio chiave: **a chiamare il MCP server è l'AGENTE, non l'LLM.** Quindi non
+conta "MCP sullo stesso nodo dell'LLM", ma **dove gira l'agente rispetto al MCP**.
+
+| Dove gira l'Agent | Come raggiunge il MCP | Esporre il MCP? |
+|---|---|---|
+| Stesso nodo del MCP | `stdio` (sottoprocesso locale) | **No** |
+| Nodo diverso dal MCP | `sse` / `streamable-http` (rete) | **Sì** (+ sicurezza) |
+
+### Scenario A — Tutto sul server (nessuna esposizione) — il nostro caso
+Agent + LLM + MCP co-locati. Il Client locale fa solo da trigger. L'agente lancia il
+MCP via stdio. Niente porte aperte = superficie d'attacco minima.
+
+```mermaid
+flowchart TB
+    subgraph PC["PC locale"]
+        CL["Client thin (trigger)"]
+    end
+    subgraph SRV["Server (compute)"]
+        AG["Agent"]
+        LLM["LLM qwen via Ollama"]
+        MCP["MCP server"]
+        AG -->|"stdio (subprocess)"| MCP
+        AG -->|"HTTP su localhost"| LLM
+    end
+    CL -->|"SSH / trigger"| AG
+```
+
+### Scenario B — Agent + Client sul PC, LLM + MCP sul server (esposizione necessaria)
+Vuoi tenere il compute pesante (LLM + analisi CodeQL) sul server, ma orchestrare
+dal tuo PC. L'agente, stando sul PC, raggiunge **via rete** sia l'LLM (API Ollama)
+sia il MCP server (SSE). Qui il MCP server **va esposto**.
+
+```mermaid
+flowchart TB
+    subgraph PC["PC locale"]
+        CL["Client"]
+        AG["Agent"]
+        CL --> AG
+    end
+    subgraph SRV["Server (compute)"]
+        LLM["LLM qwen via Ollama (porta 11434)"]
+        MCP["MCP server SSE (porta 8000)"]
+    end
+    AG -->|"rete: API Ollama"| LLM
+    AG -->|"rete: MCP SSE"| MCP
+```
+
+Avvio del MCP in modalità esposta (Scenario B), sul server:
+```bash
+MCP_TRANSPORT=sse MCP_HOST=0.0.0.0 MCP_PORT=8000 python -m server
+```
+
+### Sicurezza quando esponi (importante)
+Il MCP server **non ha autenticazione**. Se lo esponi, proteggilo SEMPRE:
+- **Preferibile:** non aprire porte pubbliche; usa un **tunnel SSH** dal PC
+  (`ssh -L 8000:localhost:8000 <user>@<host>`) e tieni il server bindato su
+  `127.0.0.1`. L'agente parla a `localhost:8000`, il traffico viaggia cifrato in SSH.
+- In alternativa: **VPN** tra PC e server, oppure **firewall** che consente solo
+  l'IP del PC, o un **reverse proxy con autenticazione** davanti al MCP.
+- Mai esporre `0.0.0.0:8000` su Internet senza uno di questi accorgimenti.
+
+> Regola pratica: esponi solo se l'agente è su una macchina diversa. Se puoi, tieni
+> l'agente sul server (Scenario A) e non esporre nulla.
+
+## D: Architettura attuale a 2 nodi + interazioni interne (avvio e query)
+
+Stato dopo il refactoring dell'agente a **client SSE**: agente e MCP server sono
+processi indipendenti. Nel deploy tipico tutto il compute sta sul server; il PC
+locale fa solo da trigger.
+
+### 1) Topologia: i 2 nodi e i processi
+```mermaid
+flowchart TB
+    subgraph PC["PC locale (thin client)"]
+        CL["Client / trigger via SSH"]
+    end
+    subgraph SRV["Server Ubuntu (compute)"]
+        AG["Agent (agent.py) - processo 1"]
+        OLL["Ollama + qwen2.5-coder - processo 2"]
+        MCPP["MCP server (python -m server, SSE :8000) - processo 3"]
+        TC["Toolchain CodeQL (binario + libreria standard)"]
+        RP["Repo da analizzare"]
+        AG -->|"HTTP localhost:11434 (chat)"| OLL
+        AG -->|"SSE localhost:8000 (tool)"| MCPP
+        MCPP -->|"lancia"| TC
+        MCPP -->|"legge / analizza"| RP
+    end
+    CL -->|"SSH: avvia agente"| AG
+```
+Tre processi separati sul server; il PC fa solo da trigger. Tutto su `localhost`
+-> niente esposto in rete.
+
+### 2) Componenti interni del server (tutte le porzioni)
+```mermaid
+flowchart TB
+    subgraph ENTRY["Entry point"]
+        DUNDER["__main__.py"] --> MAIN["main.py"]
+    end
+    subgraph TRANS["transport/"]
+        INST["mcp_instance.py (oggetto mcp FastMCP)"]
+        RUN["run.py (stdio | sse)"]
+    end
+    subgraph REG["registry/"]
+        LOAD["loader.py (genera 16 check_*)"]
+    end
+    subgraph TOOLS["tools/"]
+        FS["filesystem.py"]
+        DB["database.py"]
+        QR["queries.py"]
+        CF["config_flags.py"]
+        KW["knowledge.py"]
+    end
+    subgraph CORE["core/ (logica pura)"]
+        RUNNER["runner.py"]
+        SARIF["sarif.py"]
+        EXEC["executor.py"]
+        TMPL["template.py"]
+    end
+    subgraph KNOW["knowledge/"]
+        STORE["store.py"]
+        DATA["data/ (cwe_wiki, cwe_catalog)"]
+    end
+    subgraph SUPP["supporto"]
+        CFG["config.py"]
+        LOG["log.py"]
+    end
+    subgraph DISK["dati su disco"]
+        QT["query_templates/*.tmpl"]
+        GQ["generated_queries/*.ql (runtime)"]
+        WK["_work/ (DB + sarif)"]
+    end
+    MAIN --> TOOLS
+    MAIN --> LOAD
+    MAIN --> RUN
+    RUN --> INST
+    TOOLS --> INST
+    LOAD --> INST
+    TOOLS --> CORE
+    TOOLS --> STORE
+    LOAD --> CORE
+    LOAD --> STORE
+    EXEC --> RUNNER
+    EXEC --> SARIF
+    EXEC --> TMPL
+    EXEC --> GQ
+    EXEC --> WK
+    STORE --> DATA
+    QR --> QT
+    CORE --> CFG
+    CORE --> LOG
+    STORE --> CFG
+```
+
+### 3) Avvio: cosa succede internamente
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OP as Operatore
+    participant MAIN as main.py
+    participant TOOLS as tools
+    participant REG as registry/loader
+    participant MCP as mcp FastMCP
+    participant RUN as transport/run
+    OP->>MAIN: MCP_TRANSPORT=sse python -m server
+    MAIN->>TOOLS: import moduli (side effect)
+    TOOLS->>MCP: @mcp.tool() registra 10 tool statici
+    MAIN->>REG: import loader (side effect)
+    REG->>MCP: add_tool() x16 (check_*)
+    MAIN->>MCP: log banner "tools registered: 26"
+    MAIN->>RUN: run()
+    RUN->>MCP: mcp.run(transport=sse)
+    Note over MCP: listener SSE su :8000 in ascolto
+    OP->>OP: (altro processo) python agent.py repo
+    Note over OP,MCP: l'agente fa sse_client(URL) -> initialize -> list_tools (26)
+```
+
+### 4) Esecuzione di una query (end-to-end attraverso i componenti)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OLL as LLM qwen
+    participant AG as Agent
+    participant MCP as mcp FastMCP SSE
+    participant T as tools/queries.py
+    participant TM as core/template.py
+    participant KS as knowledge/store.py
+    participant EX as core/executor.py
+    participant RN as core/runner.py
+    participant CQ as CodeQL toolchain
+    participant SA as core/sarif.py
+    OLL-->>AG: tool_call run_taint_query(sink, cwe)
+    AG->>MCP: call_tool via SSE
+    MCP->>T: esegue la funzione del tool
+    T->>TM: render_names / normalize_cwe (validazione anti-injection)
+    T->>KS: lookup CWE (nome, remediation)
+    T->>EX: render_and_analyze(template, sostituzioni, cwe, extra)
+    EX->>EX: scrive la query in generated_queries/
+    EX->>RN: run(codeql database analyze ...)
+    RN->>CQ: esegue il processo
+    CQ-->>RN: SARIF + exit code
+    RN-->>EX: (rc, stdout, stderr)
+    EX->>SA: parse_sarif()
+    SA-->>EX: findings puliti (con flow_path = prova)
+    EX-->>T: JSON dei finding
+    T-->>MCP: risultato
+    MCP-->>AG: risultato via SSE
+    AG->>OLL: ecco i finding (prossima decisione)
+```
+
+> Nota trasversale: ogni `call_tool` passa per il wrapper di logging
+> (`log.py` -> `instrument_tool_calls`), che stampa su stderr `-> tool call` e
+> `tool done`/`error`. Non alterato dal trasporto (vale sia stdio sia SSE).
