@@ -9,7 +9,7 @@ import time
 
 from agent import config
 from agent.clients import mcp
-from agent.clients.ollama import OllamaChat
+from agent.clients.factory import make_llm
 from agent.prompts import SYSTEM_PROMPT
 from agent.report import RunStats
 from agent.robustness import checkpoint as ckpt_mod
@@ -50,19 +50,21 @@ def _brief(args: dict) -> str:
 #            il report di sicurezza.
 # Input:    repo_path = progetto da analizzare; model = nome del modello LLM;
 #           report_path = dove salvare il report; max_steps = numero massimo di turni;
-#           resume = se True riprende da un checkpoint esistente.
+#           resume = se True riprende da un checkpoint esistente;
+#           provider = backend LLM ("ollama" | "gemini").
 # Output:   stringa col report completo (intestazione YAML + corpo); lo scrive anche su disco.
 # Come realizzato: apre la connessione MCP (connect), carica o inizializza i messaggi, e per
 #            ogni step chiede al modello, recupera le tool-call (anche se in testo), corregge
 #            il db_path, evita le ripetizioni (cache + nudge), esegue sul server, registra le
 #            statistiche e salva il checkpoint; alla fine chiama RunStats.finalize.
 async def run_agent(
-    repo_path: str, model: str, report_path: str, max_steps: int = 30, resume: bool = False
+    repo_path: str, model: str, report_path: str, max_steps: int = 30,
+    resume: bool = False, provider: str = "ollama",
 ) -> str:
     # The MCP server is an INDEPENDENT service: the agent is just an SSE client.
     # Start it separately (e.g. `MCP_TRANSPORT=sse python -m server`) and point
     # MCP_SERVER_URL at it (localhost in local, the server host in remote).
-    llm = OllamaChat(model)
+    llm = make_llm(provider, model)
 
     async with mcp.connect(config.MCP_SERVER_URL) as (session, mcp_tools):
         tools = mcp.mcp_tools_to_ollama(mcp_tools)
@@ -87,7 +89,7 @@ async def run_agent(
         stats = RunStats(model=model, repo_path=repo_path, max_steps=max_steps,
                          steps_done=start_step)
 
-        _log(f"Connected: {len(tool_names)} tools | model={model} | repo={repo_path}")
+        _log(f"Connected: {len(tool_names)} tools | provider={provider} | model={model} | repo={repo_path}")
 
         for step in range(start_step, max_steps):
             _log(f"[step {step}] asking {model} ...")

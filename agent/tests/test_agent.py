@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.clients.gemini import _to_openai
 from agent.clients.ollama import plain
 from agent.report import RunStats, default_report_path, slug
 from agent.robustness.checkpoint import save_checkpoint
@@ -102,6 +103,23 @@ def test_checkpoint_roundtrip(tmp_path: Path):
 
 def test_plain_normalizes_dict():
     assert plain({"role": "assistant", "content": "x"}) == {"role": "assistant", "content": "x"}
+
+
+def test_gemini_message_translation_pairs_tool_call_ids():
+    # An assistant turn with a tool call, followed by its tool result, must be
+    # translated so the tool message carries the matching tool_call_id.
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "abc", "function": {"name": "list_python_files",
+                                                   "arguments": {"repo_path": "x"}}}]},
+        {"role": "tool", "tool_name": "list_python_files", "content": "result"},
+    ]
+    out = _to_openai(messages)
+    assert out[2]["tool_calls"][0]["id"] == "abc"
+    assert out[2]["tool_calls"][0]["function"]["arguments"] == '{"repo_path": "x"}'  # serialized
+    assert out[3] == {"role": "tool", "tool_call_id": "abc", "content": "result"}
 
 
 def test_resolve_source_zip(tmp_path: Path):

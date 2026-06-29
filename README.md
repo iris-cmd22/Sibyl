@@ -209,11 +209,32 @@ I test puri dell'agente girano anche senza Ollama:
 
 | Variabile | Default | Significato |
 |---|---|---|
+| `AGENT_LLM_PROVIDER` | `ollama` | backend LLM: `ollama` (locale) o `gemini` (hosted) |
 | `AGENT_MODEL` | `qwen2.5-coder:14b` | modello Ollama da usare |
 | `OLLAMA_HOST` | `http://localhost:11434` | indirizzo di Ollama |
+| `GEMINI_API_KEY` | — | API key di Google AI Studio (solo per `gemini`) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | modello Gemini (es. `gemini-2.5-pro`) |
 | `MCP_SERVER_URL` | `http://127.0.0.1:8000/sse` | URL SSE del server MCP |
 | `AGENT_WORK_DIR` | `agent/_work` | dove salvare i checkpoint |
 | `AGENT_REPORTS_DIR` | `agent/reports` | dove salvare i report |
+
+### Scegliere il provider LLM
+
+L'agente può usare un modello **locale** (Ollama) o uno **hosted** (Gemini, utile
+quando la GPU locale non è pronta). Il provider si sceglie con `--provider` o con
+`AGENT_LLM_PROVIDER`:
+
+```bash
+# Ollama (default)
+python -m agent _smoketest_repo
+
+# Gemini (serve una API key di Google AI Studio, non l'abbonamento dell'app)
+export GEMINI_API_KEY=...          # o mettila nel .env
+python -m agent _smoketest_repo --provider gemini --model gemini-2.5-flash
+```
+
+> Per Gemini serve `pip install openai` (incluso in `requirements.txt`) e una API
+> key da https://aistudio.google.com/apikey (esiste un free tier).
 
 Le tre obbligatorie non hanno default: se mancano, il server si ferma con un errore
 che indica la variabile da impostare.

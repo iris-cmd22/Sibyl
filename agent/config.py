@@ -15,9 +15,21 @@ try:
 except ImportError:
     pass
 
+# --- LLM provider (which backend drives the analysis) ---
+# "ollama" = local model; "gemini" = hosted Google model (via OpenAI-compat API).
+LLM_PROVIDER = os.environ.get("AGENT_LLM_PROVIDER", "ollama")
+
 # --- Ollama (the local LLM driving the analysis) ---
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen2.5-coder:14b")
+
+# --- Gemini (hosted, via its OpenAI-compatible endpoint) ---
+# Set GEMINI_API_KEY (or GOOGLE_API_KEY) to use --provider gemini.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+GEMINI_BASE_URL = os.environ.get(
+    "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+)
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 # --- MCP server (independent service; the agent connects as an SSE client) ---
 # In local it points at localhost; for remote just change the URL (server host).
