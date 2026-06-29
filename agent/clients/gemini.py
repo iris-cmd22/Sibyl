@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 
 from agent import config
 
@@ -82,6 +83,26 @@ class GeminiChat:
         self.model = model
         self._client = AsyncOpenAI(api_key=config.GEMINI_API_KEY,
                                    base_url=config.GEMINI_BASE_URL)
+        # Min seconds between requests (proactive throttle to stay under the RPM
+        # limit). 0 = disabled. For the free tier set GEMINI_MIN_INTERVAL.
+        self._min_interval = config.GEMINI_MIN_INTERVAL
+        self._last_call = 0.0
+
+    # Obiettivo: distanziare le richieste a Gemini per non superare il limite di
+    #            richieste/minuto (evita a monte gli errori 429).
+    # Input:    nessuno (usa l'istante dell'ultima chiamata e l'intervallo minimo).
+    # Output:   nessuno (eventualmente attende).
+    # Come realizzato: se dall'ultima chiamata è passato meno dell'intervallo minimo,
+    #            dorme per il tempo rimanente; poi aggiorna il timestamp.
+    async def _throttle(self) -> None:
+        if self._min_interval <= 0:
+            return
+        wait = self._min_interval - (time.monotonic() - self._last_call)
+        if wait > 0:
+            print(f"[gemini] throttle: attendo {wait:.1f}s (rate limit)",
+                  file=sys.stderr, flush=True)
+            await asyncio.sleep(wait)
+        self._last_call = time.monotonic()
 
     # Obiettivo: inviare un turno di conversazione a Gemini e restituirlo nel formato che
     #            l'orchestrator si aspetta (uguale a quello di Ollama).
@@ -92,6 +113,7 @@ class GeminiChat:
     async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         from openai import RateLimitError
 
+        await self._throttle()
         oai_messages = _to_openai(messages)
         last_exc = None
         for attempt in range(6):

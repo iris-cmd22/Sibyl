@@ -30,6 +30,9 @@ GEMINI_BASE_URL = os.environ.get(
     "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Secondi minimi tra due richieste a Gemini (throttle anti rate-limit). 0 = off.
+# Free tier 5 req/min -> ~13s; 15 req/min -> ~5s.
+GEMINI_MIN_INTERVAL = float(os.environ.get("GEMINI_MIN_INTERVAL", "0"))
 
 # --- MCP server (independent service; the agent connects as an SSE client) ---
 # In local it points at localhost; for remote just change the URL (server host).
