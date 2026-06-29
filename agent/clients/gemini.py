@@ -7,9 +7,25 @@ need no conversion. Only the message history is translated, because under the
 OpenAI protocol each tool result must carry the tool_call_id it answers."""
 from __future__ import annotations
 
+import asyncio
 import json
+import re
+import sys
 
 from agent import config
+
+
+# Obiettivo: capire quanti secondi aspettare dopo un errore 429 (rate limit).
+# Input:    exc = l'eccezione RateLimitError (il suo testo contiene il ritardo suggerito).
+# Output:   secondi da attendere (float).
+# Come realizzato: cerca nel messaggio "retry in <n>s" o "retryDelay: <n>s"; se non trova
+#            nulla usa il default.
+def _retry_delay(exc, default: float = 30.0) -> float:
+    text = str(exc)
+    m = re.search(r"retry in ([\d.]+)s", text) or re.search(r"retryDelay['\"]?:?\s*['\"]?(\d+)", text)
+    if m:
+        return float(m.group(1)) + 1.0   # piccolo margine
+    return default
 
 
 # Obiettivo: tradurre i messaggi nel formato "canonico" dell'agente verso il formato
@@ -74,11 +90,27 @@ class GeminiChat:
     # Come realizzato: traduce i messaggi con _to_openai, chiama l'API chat.completions e
     #            ricompone content + tool_calls (name/arguments) nel formato canonico.
     async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
-        resp = await self._client.chat.completions.create(
-            model=self.model,
-            messages=_to_openai(messages),
-            tools=tools or None,
-        )
+        from openai import RateLimitError
+
+        oai_messages = _to_openai(messages)
+        last_exc = None
+        for attempt in range(6):
+            try:
+                resp = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=oai_messages,
+                    tools=tools or None,
+                )
+                break
+            except RateLimitError as e:   # free tier quota: wait and retry
+                last_exc = e
+                delay = _retry_delay(e)
+                print(f"[gemini] rate limited (429), waiting {delay:.0f}s "
+                      f"(attempt {attempt + 1}/6)", file=sys.stderr, flush=True)
+                await asyncio.sleep(delay)
+        else:
+            raise last_exc   # all attempts exhausted
+
         choice = resp.choices[0].message
         msg: dict = {"role": "assistant", "content": choice.content or ""}
         if getattr(choice, "tool_calls", None):
