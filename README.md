@@ -1,21 +1,44 @@
-# CodeQL Security Agent
+# Sibyl — CodeQL Security Agent
 
-Agente che usa un **modello Ollama locale** per analizzare la sicurezza di una
-repository, eseguendo query **CodeQL** esposte come **tool MCP**.
+Sibyl analizza la sicurezza di una repository facendo guidare l'analisi a un
+**modello Ollama locale**, che esegue query **CodeQL** esposte come **tool MCP**.
+
+È composto da **due programmi indipendenti** che girano in parallelo:
+
+- **Server MCP** (`python -m server`) — incapsula la CLI CodeQL ed espone 26 tool.
+- **Agente** (`python -m agent`) — client che connette l'LLM al server e orchestra
+  l'analisi fino al report.
 
 ## Architettura
 
+Tre processi che dialogano su `localhost` (nessuna porta esposta all'esterno):
+
 ```
-Ollama LLM  ──tool_calls──►  agent.py (host)  ──MCP/stdio──►  codeql_mcp_server.py  ──►  CodeQL CLI
-(qwen2.5-coder:14b)          loop tool-calling                tool MCP                    + query locali
+                    ┌─────────────────────────────────────────────┐
+                    │  Stessa macchina (Ubuntu o Windows)          │
+   python -m agent ─┤                                              │
+   (client)         │   Agente ──HTTP:11434──►  Ollama (qwen)      │
+                    │      │                                       │
+                    │      └────SSE:8000────►  Server MCP ──► CodeQL CLI
+                    │                          (python -m server)  │
+                    └─────────────────────────────────────────────┘
 ```
 
-- **`codeql_mcp_server.py`** — server MCP (FastMCP) che incapsula la CLI CodeQL.
-- **`agent.py`** — host: avvia il server come subprocess stdio, espone i tool al
-  modello Ollama, gira il loop chat→tool→risultato finché il modello scrive il report.
-- **`config.py`** — modello, percorsi CodeQL, suite di default, timeout.
-- **`query_templates/`** — template `.ql.tmpl` parametrizzati (taint, api-misuse, insecure-config-flag).
-- **`knowledge/`** — `cwe_wiki.json` (CWE verificabili con azioni) + `cwe_catalog.json` (969 CWE, lookup).
+- L'agente parla con l'**LLM** via HTTP (function calling) e con il **server** via
+  SSE (tool MCP). Il modello decide *cosa* fare, l'agente fa *eseguire* al server.
+- Dettagli interni: `agent/COMPONENTI.md` (agente) e
+  `documentazione/Server_MCP_Architettura.md` (server).
+
+> ⚠️ Il server legge i file della repo dal **proprio filesystem**: la repository da
+> analizzare deve trovarsi **sulla macchina dove gira il server** (vedi §Uso).
+
+## Componenti
+
+| Cartella | Cosa contiene |
+|---|---|
+| `server/` | Server MCP autocontenuto: `core/`, `tools/`, `registry/`, `knowledge/`, `transport/`, `config.py` |
+| `agent/` | Agente modulare: `orchestrator.py`, `clients/`, `robustness/`, `report.py`, `config.py` |
+| `query_templates/`, `generated_queries/` | template `.ql.tmpl` e query generate (dentro `server/`) |
 
 ## Tool MCP esposti
 
@@ -56,66 +79,147 @@ dedicati + un tool generico parametrizzato:
 Per pattern non coperti: `run_insecure_config_flag_query(db_path, module, functions,
 param_name, insecure_value, cwe)`.
 
-## Prerequisiti
+## Prerequisiti (entrambi gli OS)
 
-- **CodeQL CLI** (≥ 2.25) su PATH (oppure imposta `CODEQL_BIN`)
+- **Python 3.10+** (consigliato 3.12/3.13; con Python molto recente alcune wheel
+  potrebbero mancare — in tal caso usa un venv 3.12/3.13).
+- **CodeQL CLI** (≥ 2.25) — su PATH oppure imposta `CODEQL_BIN` col percorso completo.
 - Un checkout di **[vscode-codeql-starter](https://github.com/github/vscode-codeql-starter)**
-  (le query si usano via `--search-path`, **niente download di pack**)
-- **Ollama** in esecuzione con il modello desiderato (default `qwen2.5-coder:14b`)
+  (le query si usano via `--search-path`, **niente download di pack**):
+  ```
+  git clone --depth 1 --recursive --shallow-submodules \
+    https://github.com/github/vscode-codeql-starter.git
+  ```
+- **Ollama** in esecuzione con il modello desiderato (`ollama pull qwen2.5-coder:3b`,
+  o la taglia che preferisci).
 
 ## Setup
 
-```powershell
-# 1. dipendenze (uv consigliato)
-uv venv
-uv pip install -r requirements.txt
-#   oppure: pip install -r requirements.txt
+Un solo file **`.env`** nella root serve sia al server sia all'agente (entrambi lo
+caricano). Le tre variabili CodeQL sono **obbligatorie**.
 
-# 2. configura i percorsi locali in un file .env (NON committato)
+### Ubuntu / Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt        # mcp + ollama + python-dotenv
+pip install pytest                      # solo se vuoi lanciare i test
+
+cat > .env <<'EOF'
+CODEQL_BIN=/home/utente/codeql-tools/codeql/codeql
+CODEQL_SEARCH_PATH=/home/utente/codeql-tools/vscode-codeql-starter/ql
+CODEQL_SUITE=/home/utente/codeql-tools/vscode-codeql-starter/ql/python/ql/src/codeql-suites/python-security-extended.qls
+CUSTOM_QUERY_DIR=/home/utente/codeql-tools/vscode-codeql-starter/codeql-custom-queries-python
+AGENT_MODEL=qwen2.5-coder:3b
+EOF
 ```
 
-Crea un file **`.env`** nella root del progetto con i percorsi della **tua**
-copia di `vscode-codeql-starter`. Le tre variabili CodeQL sono **obbligatorie**
-(senza, `config.py` si ferma con un messaggio esplicito):
+### Windows (PowerShell)
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip
+pip install -r requirements.txt        # mcp + ollama + python-dotenv
+pip install pytest                      # solo se vuoi lanciare i test
+```
+
+Crea il file `.env` nella root (adatta i percorsi alla tua macchina):
 
 ```env
-# percorsi del checkout vscode-codeql-starter (adatta alla tua macchina)
-CODEQL_SEARCH_PATH=C:\path\to\vscode-codeql-starter\ql
-CODEQL_SUITE=C:\path\to\vscode-codeql-starter\ql\python\ql\src\codeql-suites\python-security-extended.qls
-CUSTOM_QUERY_DIR=C:\path\to\vscode-codeql-starter\codeql-custom-queries-python
-
-# opzionali (questi hanno un default)
-AGENT_MODEL=qwen2.5-coder:14b
-OLLAMA_HOST=http://localhost:11434
-CODEQL_BIN=codeql
+CODEQL_BIN=C:\codeql-tools\codeql\codeql.exe
+CODEQL_SEARCH_PATH=C:\codeql-tools\vscode-codeql-starter\ql
+CODEQL_SUITE=C:\codeql-tools\vscode-codeql-starter\ql\python\ql\src\codeql-suites\python-security-extended.qls
+CUSTOM_QUERY_DIR=C:\codeql-tools\vscode-codeql-starter\codeql-custom-queries-python
+AGENT_MODEL=qwen2.5-coder:3b
 ```
 
 `.env` è in `.gitignore`: ogni macchina ha il suo.
 
 ## Uso
 
-L'agente è un CLIENT del server MCP: avvia prima il server
-(`MCP_TRANSPORT=sse python -m server`), poi l'agente.
+Servono **due terminali** (il server resta in ascolto, l'agente lo usa). La
+repository da analizzare deve stare **sulla stessa macchina del server**.
 
-```powershell
-python -m agent "C:\path\alla\repo"
-# opzioni: --model qwen2.5-coder:7b   --max-steps 30   --resume   --report path.md
+### Ubuntu / Linux
+
+```bash
+# Terminale A — avvia il server MCP (resta in esecuzione)
+source .venv/bin/activate
+MCP_TRANSPORT=sse python -m server          # atteso: "tools registered: 26" su :8000
+
+# Terminale B — lancia l'agente
+source .venv/bin/activate
+python -m agent /percorso/alla/repo
+#   esempio incluso:  python -m agent _smoketest_repo
+#   opzioni: --model qwen2.5-coder:3b  --max-steps 30  --resume  --report out.md
 ```
 
-Il report Markdown viene salvato **automaticamente** in
-`reports/<repo>/<model>__<timestamp>.md`, con front-matter YAML (model, repository,
-durata, tools_used, cwes_found, total_findings). `--report` forza un path specifico
-ma non è necessario. Database CodeQL e SARIF intermedi finiscono in `_work/`.
-
-Esempio sugli insecure config flag (repo di prova con tutti i pattern):
+### Windows (PowerShell)
 
 ```powershell
-python -m agent _insecure_config_testrepo
+# Terminale A — avvia il server MCP (resta in esecuzione)
+.\.venv\Scripts\Activate.ps1
+$env:MCP_TRANSPORT = "sse"; python -m server
+
+# Terminale B — lancia l'agente
+.\.venv\Scripts\Activate.ps1
+python -m agent C:\percorso\alla\repo
+#   opzioni: --model qwen2.5-coder:3b  --max-steps 30  --resume  --report out.md
 ```
+
+L'agente accetta anche un file **`.zip`** (lo estrae da solo). Durante l'esecuzione
+stampa l'avanzamento live su stderr (`[step N] -> tool(...)`, tempi, esito).
+
+Il report Markdown è salvato in `agent/reports/<repo>/<model>__<timestamp>.md`, con
+front-matter YAML (model, repository, durata, tools_used, cwes_found,
+total_findings). `--report` forza un percorso specifico. Database CodeQL e SARIF
+intermedi finiscono in `server/_work/`; i checkpoint dell'agente in `agent/_work/`.
+
+## Test
+
+```bash
+pytest -m "not codeql and not llm"   # veloci (unit agente + server), nessuna dipendenza esterna
+pytest -m "not llm"                  # + compile/integrazione CodeQL (lenti)
+pytest                               # + end-to-end LLM (molto lento)
+```
+
+I test puri dell'agente girano anche senza Ollama:
+`pytest agent/tests/test_agent.py`.
+
+## Configurazione (via `.env` o variabili d'ambiente)
+
+**Server MCP** (lette da `server/config.py`):
+
+| Variabile | Obbligatoria | Default | Significato |
+|---|:---:|---|---|
+| `CODEQL_SEARCH_PATH` | ✅ | — | cartella `ql` del checkout vscode-codeql-starter |
+| `CODEQL_SUITE` | ✅ | — | file `.qls` della suite di sicurezza |
+| `CUSTOM_QUERY_DIR` | ✅ | — | cartella con le query custom `*Broad.ql` |
+| `CODEQL_BIN` | | `codeql` | binario CodeQL (percorso completo se non su PATH) |
+| `MCP_TRANSPORT` | | `stdio` | trasporto: `stdio` / `sse` / `streamable-http` |
+| `MCP_HOST` / `MCP_PORT` | | `0.0.0.0` / `8000` | indirizzo e porta (solo trasporti di rete) |
+| `CODEQL_TIMEOUT` | | `1800` | timeout (s) per comando CodeQL |
+| `SIBYL_LOG_LEVEL` | | `INFO` | verbosità log del server |
+
+**Agente** (lette da `agent/config.py`):
+
+| Variabile | Default | Significato |
+|---|---|---|
+| `AGENT_MODEL` | `qwen2.5-coder:14b` | modello Ollama da usare |
+| `OLLAMA_HOST` | `http://localhost:11434` | indirizzo di Ollama |
+| `MCP_SERVER_URL` | `http://127.0.0.1:8000/sse` | URL SSE del server MCP |
+| `AGENT_WORK_DIR` | `agent/_work` | dove salvare i checkpoint |
+| `AGENT_REPORTS_DIR` | `agent/reports` | dove salvare i report |
+
+Le tre obbligatorie non hanno default: se mancano, il server si ferma con un errore
+che indica la variabile da impostare.
 
 ## Estendere: aggiungere un template
 
-1. Scrivi `query_templates/<nome>.ql.tmpl` con placeholder `{{CWE_ID_SUFFIX}}` /
+1. Scrivi `server/query_templates/<nome>.ql.tmpl` con placeholder `{{CWE_ID_SUFFIX}}` /
    `{{CWE_TAG_LINE}}` (più gli eventuali segnaposto specifici).
 2. Registra il tool nel server (per gli insecure config flag basta una voce in
    `INSECURE_CONFIG_FLAG_TEMPLATES`, il tool `check_insecure_<key>` viene generato
@@ -124,26 +228,3 @@ python -m agent _insecure_config_testrepo
 4. Aggiungi la voce a `server/knowledge/cwe_wiki.json` (con `detection` e `actions`).
 5. `python build_actions.py` per rigenerare/completare le azioni.
 6. Aggiungi i test in `server/tests/test_server.py` (compile + integrazione).
-
-## Test
-
-```powershell
-pytest -m "not codeql and not llm"   # veloci (unit + KB), nessuna dipendenza esterna
-pytest -m "not llm"                  # + compile/integrazione CodeQL (lenti)
-pytest                               # + end-to-end LLM (molto lento)
-```
-
-## Configurazione (via `.env` o variabili d'ambiente)
-
-| Variabile | Obbligatoria | Default |
-|-----------|:---:|---------|
-| `CODEQL_SEARCH_PATH` | ✅ | — (percorso al checkout) |
-| `CODEQL_SUITE` | ✅ | — |
-| `CUSTOM_QUERY_DIR` | ✅ | — |
-| `AGENT_MODEL` | | `qwen2.5-coder:14b` |
-| `OLLAMA_HOST` | | `http://localhost:11434` |
-| `CODEQL_BIN` | | `codeql` |
-| `CODEQL_TIMEOUT` | | `1800` |
-
-Le tre obbligatorie non hanno default: se mancano, `config.py` solleva un errore
-con il nome della variabile da impostare.
