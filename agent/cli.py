@@ -22,8 +22,10 @@ from agent.source import resolve_source
 def main() -> None:
     ap = argparse.ArgumentParser(description="CodeQL security agent (Ollama/Gemini + MCP)")
     ap.add_argument("repo_path", help="Path to the repository (a directory or a .zip)")
-    ap.add_argument("--provider", default=config.LLM_PROVIDER, choices=["ollama", "gemini"],
-                    help="LLM backend (default from AGENT_LLM_PROVIDER, else 'ollama').")
+    ap.add_argument("--provider", default=config.LLM_PROVIDER,
+                    choices=["ollama", "gemini", "openai"],
+                    help="LLM backend (default from AGENT_LLM_PROVIDER, else 'ollama'). "
+                         "'openai' = any OpenAI-compatible API (Groq/Cerebras/...).")
     ap.add_argument("--model", default=None,
                     help="Model id. Default depends on provider (AGENT_MODEL / GEMINI_MODEL).")
     ap.add_argument("--report", default=None,
@@ -34,7 +36,8 @@ def main() -> None:
     args = ap.parse_args()
 
     # Per-provider default model when --model is omitted.
-    model = args.model or (config.GEMINI_MODEL if args.provider == "gemini" else config.AGENT_MODEL)
+    _defaults = {"gemini": config.GEMINI_MODEL, "openai": config.OPENAI_MODEL}
+    model = args.model or _defaults.get(args.provider, config.AGENT_MODEL)
 
     repo_path = resolve_source(args.repo_path)
     report_path = args.report or default_report_path(args.repo_path, model)

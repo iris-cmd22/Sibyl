@@ -209,11 +209,13 @@ I test puri dell'agente girano anche senza Ollama:
 
 | Variabile | Default | Significato |
 |---|---|---|
-| `AGENT_LLM_PROVIDER` | `ollama` | backend LLM: `ollama` (locale) o `gemini` (hosted) |
+| `AGENT_LLM_PROVIDER` | `ollama` | backend: `ollama` (locale), `gemini` o `openai` (OpenAI-compat) |
 | `AGENT_MODEL` | `qwen2.5-coder:14b` | modello Ollama da usare |
 | `OLLAMA_HOST` | `http://localhost:11434` | indirizzo di Ollama |
 | `GEMINI_API_KEY` | — | API key di Google AI Studio (solo per `gemini`) |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | modello Gemini (es. `gemini-2.5-pro`) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | modello Gemini (es. `gemini-2.0-flash`) |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — / OpenAI | chiave + endpoint per provider `openai` (Groq/Cerebras/...) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | modello per il provider `openai` |
 | `MCP_SERVER_URL` | `http://127.0.0.1:8000/sse` | URL SSE del server MCP |
 | `AGENT_WORK_DIR` | `agent/_work` | dove salvare i checkpoint |
 | `AGENT_REPORTS_DIR` | `agent/reports` | dove salvare i report |
@@ -230,11 +232,17 @@ python -m agent _smoketest_repo
 
 # Gemini (serve una API key di Google AI Studio, non l'abbonamento dell'app)
 export GEMINI_API_KEY=...          # o mettila nel .env
-python -m agent _smoketest_repo --provider gemini --model gemini-2.5-flash
+python -m agent _smoketest_repo --provider gemini --model gemini-2.0-flash
+
+# Qualsiasi API OpenAI-compatibile (es. Groq: free tier generoso e veloce)
+export OPENAI_BASE_URL=https://api.groq.com/openai/v1
+export OPENAI_API_KEY=gsk_...
+python -m agent _smoketest_repo --provider openai --model llama-3.3-70b-versatile
 ```
 
-> Per Gemini serve `pip install openai` (incluso in `requirements.txt`) e una API
-> key da https://aistudio.google.com/apikey (esiste un free tier).
+> Per Gemini/OpenAI-compat serve `pip install openai` (incluso in `requirements.txt`).
+> Free tier consigliati per l'uso ad agente (molte richieste): **Groq**
+> (https://console.groq.com) o **Cerebras**; Gemini free è più limitato.
 
 Le tre obbligatorie non hanno default: se mancano, il server si ferma con un errore
 che indica la variabile da impostare.

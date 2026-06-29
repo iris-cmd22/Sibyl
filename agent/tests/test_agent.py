@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.clients.gemini import _to_openai
+from agent.clients.openai_compat import _to_openai
 from agent.clients.ollama import plain
 from agent.report import RunStats, default_report_path, slug
 from agent.robustness.checkpoint import save_checkpoint

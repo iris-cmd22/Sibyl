@@ -34,6 +34,14 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 # Free tier 5 req/min -> ~13s; 15 req/min -> ~5s.
 GEMINI_MIN_INTERVAL = float(os.environ.get("GEMINI_MIN_INTERVAL", "0"))
 
+# --- Generic OpenAI-compatible provider (Groq, Cerebras, OpenRouter, OpenAI, ...) ---
+# Choose with --provider openai; point OPENAI_BASE_URL at the chosen service.
+# Esempi: Groq https://api.groq.com/openai/v1 ; Cerebras https://api.cerebras.ai/v1
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MIN_INTERVAL = float(os.environ.get("OPENAI_MIN_INTERVAL", "0"))
+
 # --- MCP server (independent service; the agent connects as an SSE client) ---
 # In local it points at localhost; for remote just change the URL (server host).
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8000/sse")
