@@ -1,8 +1,8 @@
-"""Security analysis agent: local Ollama model + CodeQL via MCP.
+"""Security analysis agent: an LLM (ollama/gemini/openai) + CodeQL via MCP.
 
 The agent is a CLIENT of an INDEPENDENT MCP server: start the server separately
 (`MCP_TRANSPORT=sse python -m server`), point MCP_SERVER_URL at it, then run
-`python -m agent <repo_path>`. See COMPONENTI.md for the architecture.
+`python -m agent <repo_path>`. See documentazione/agent.md for the architecture.
 
 `run_agent` is exposed lazily so the pure helper modules (report, robustness,
 source) stay importable without the `ollama`/`mcp` runtime packages installed.

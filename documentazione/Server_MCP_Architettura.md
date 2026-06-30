@@ -531,7 +531,7 @@ flowchart LR
   stessa copertura è comunque ottenibile con `run_taint_query`. Decisione attuale:
   lasciarli così, li scriveremo in futuro se servirà.
 - L'**agente** è stato rifattorizzato nel pacchetto modulare `agent/` (vedi
-  `agent/COMPONENTI.md`) e ricollegato al nuovo server come **client SSE**: si
+  `documentazione/agent.md`) e ricollegato al nuovo server come **client SSE**: si
   avvia con `python -m agent <repo>` mentre il server gira separatamente
   (`MCP_TRANSPORT=sse python -m server`).
 

@@ -26,7 +26,7 @@ Tre processi che dialogano su `localhost` (nessuna porta esposta all'esterno):
 
 - L'agente parla con l'**LLM** via HTTP (function calling) e con il **server** via
   SSE (tool MCP). Il modello decide *cosa* fare, l'agente fa *eseguire* al server.
-- Dettagli interni: `agent/COMPONENTI.md` (agente) e
+- Dettagli interni: `documentazione/agent.md` (agente) e
   `documentazione/Server_MCP_Architettura.md` (server).
 
 > ⚠️ Il server legge i file della repo dal **proprio filesystem**: la repository da
