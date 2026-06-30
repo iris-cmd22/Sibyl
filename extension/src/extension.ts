@@ -1,0 +1,249 @@
+// extension.ts — telecomando VSCode per l'agent CLI di Sibyl.
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { isServerUp, resolveConfig, runAgent, startServer, stopServer } from './sibylRunner';
+import { renderMarkdown } from './markdown';
+import { envFilePath, readEnvValues, renderConfigHtml, writeEnvValues } from './envConfig';
+
+let channel: vscode.OutputChannel;
+let statusBarItem: vscode.StatusBarItem;
+
+export function activate(context: vscode.ExtensionContext) {
+  channel = vscode.window.createOutputChannel('Sibyl');
+
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.text = '$(shield) Sibyl';
+  statusBarItem.tooltip = 'Analizza la repository con Sibyl';
+  statusBarItem.command = 'sibyl.analyzeRepository';
+  statusBarItem.show();
+
+  context.subscriptions.push(
+    channel,
+    statusBarItem,
+    vscode.commands.registerCommand('sibyl.analyzeRepository', () => analyzeRepository(context)),
+    vscode.commands.registerCommand('sibyl.startServer', async () => {
+      const config = await getValidConfig(context);
+      if (!config) {
+        return;
+      }
+      channel.show(true);
+      startServer(config, channel);
+    }),
+    vscode.commands.registerCommand('sibyl.stopServer', () => {
+      channel.show(true);
+      stopServer(channel);
+    }),
+    vscode.commands.registerCommand('sibyl.configure', () => openConfig(context)),
+  );
+}
+
+export function deactivate() {
+  if (channel) {
+    stopServer(channel);
+  }
+}
+
+/**
+ * Risolve la config e verifica che rootPath sia una vera installazione di Sibyl
+ * (contiene agent/). Se non lo è, chiede all'utente la cartella e la salva nei settings.
+ * Necessario quando l'estensione è installata (la sua cartella non è dentro Sibyl).
+ */
+async function getValidConfig(context: vscode.ExtensionContext) {
+  let config = resolveConfig(context.extensionPath);
+  if (fs.existsSync(path.join(config.rootPath, 'agent'))) {
+    return config;
+  }
+
+  const choice = await vscode.window.showErrorMessage(
+    `Sibyl: non trovo l'installazione (cartella con agent/ e server/). Indica dove si trova Sibyl.`,
+    'Seleziona cartella Sibyl', 'Annulla',
+  );
+  if (choice !== 'Seleziona cartella Sibyl') {
+    return undefined;
+  }
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: 'Usa come cartella Sibyl',
+  });
+  const root = picked?.[0]?.fsPath;
+  if (!root) {
+    return undefined;
+  }
+  if (!fs.existsSync(path.join(root, 'agent'))) {
+    vscode.window.showErrorMessage('Sibyl: la cartella selezionata non contiene agent/. Riprova.');
+    return undefined;
+  }
+
+  await vscode.workspace.getConfiguration('sibyl')
+    .update('rootPath', root, vscode.ConfigurationTarget.Global);
+  config = resolveConfig(context.extensionPath); // ri-risolve con il nuovo rootPath
+  return config;
+}
+
+/** Apre il form (webview) per modificare il .env di Sibyl. */
+async function openConfig(context: vscode.ExtensionContext) {
+  const config = await getValidConfig(context);
+  if (!config) {
+    return;
+  }
+  const rootPath = config.rootPath;
+
+  const panel = vscode.window.createWebviewPanel(
+    'sibylConfig',
+    'Sibyl: Configurazione',
+    vscode.ViewColumn.Active,
+    { enableScripts: true, retainContextWhenHidden: true },
+  );
+
+  panel.webview.html = renderConfigHtml(readEnvValues(rootPath), envFilePath(rootPath));
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg.command === 'save') {
+      try {
+        writeEnvValues(rootPath, msg.values || {});
+        panel.webview.postMessage({ command: 'status', text: '✓ Salvato in .env' });
+        vscode.window.showInformationMessage(`Sibyl: .env aggiornato (${envFilePath(rootPath)}).`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Sibyl: impossibile scrivere il .env — ${err.message}`);
+      }
+    } else if (msg.command === 'pick') {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: !msg.folder,
+        canSelectFolders: !!msg.folder,
+        canSelectMany: false,
+        openLabel: 'Seleziona',
+      });
+      if (picked?.[0]) {
+        panel.webview.postMessage({ command: 'setValue', key: msg.key, value: picked[0].fsPath });
+      }
+    }
+  }, undefined, context.subscriptions);
+}
+
+/** Comando unico: sceglie la repo, assicura il server, lancia l'agent, mostra il report. */
+async function analyzeRepository(context: vscode.ExtensionContext) {
+  const config = await getValidConfig(context);
+  if (!config) {
+    return;
+  }
+
+  const repoPath = await pickRepo();
+  if (!repoPath) {
+    return;
+  }
+
+  // Assicura che il server MCP sia raggiungibile (collegandosi a uno esistente, se c'è).
+  if (!(await isServerUp(config.mcpServerUrl))) {
+    if (!config.manageServer) {
+      vscode.window.showErrorMessage(
+        `Sibyl: nessun server MCP raggiungibile su ${config.mcpServerUrl}. ` +
+        'Avvialo tu, oppure abilita "sibyl.manageServer" per farlo gestire all\'estensione.');
+      return;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      `Il server MCP di Sibyl non risponde su ${config.mcpServerUrl}.`,
+      'Avvia server', 'Annulla',
+    );
+    if (choice !== 'Avvia server') {
+      return;
+    }
+    channel.show(true);
+    startServer(config, channel);
+    if (!(await waitServerUp(config.mcpServerUrl))) {
+      vscode.window.showErrorMessage('Il server MCP non si è avviato in tempo. Controlla l\'output "Sibyl".');
+      return;
+    }
+  }
+
+  const reportPath = path.join(os.tmpdir(), `sibyl-report-${Date.now()}.md`);
+  channel.show(true);
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `Sibyl: analisi di ${path.basename(repoPath)}...`,
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      try {
+        const result = await runAgent(config, { repoPath, reportPath }, channel, token);
+        if (token.isCancellationRequested) {
+          return;
+        }
+        if (result.exitCode !== 0) {
+          vscode.window.showErrorMessage(`Sibyl: l'agent è terminato con errore (exit ${result.exitCode}). Vedi output "Sibyl".`);
+          return;
+        }
+        const markdown = readReport(reportPath);
+        showReport(context, path.basename(repoPath), markdown);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Sibyl: impossibile avviare l'agent — ${err.message}`);
+      }
+    },
+  );
+}
+
+/** Determina la repo da analizzare: workspace singolo, scelta, o file picker. */
+async function pickRepo(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders && folders.length === 1) {
+    return folders[0].uri.fsPath;
+  }
+  if (folders && folders.length > 1) {
+    const picked = await vscode.window.showWorkspaceFolderPick();
+    return picked?.uri.fsPath;
+  }
+  const chosen = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: 'Analizza questa repository',
+  });
+  return chosen?.[0]?.fsPath;
+}
+
+/** Aspetta che il server risponda (max ~15s). */
+async function waitServerUp(url: string): Promise<boolean> {
+  for (let i = 0; i < 15; i++) {
+    if (await isServerUp(url)) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+function readReport(reportPath: string): string {
+  try {
+    return fs.readFileSync(reportPath, 'utf8');
+  } catch {
+    return '_Report non trovato sul disco. Controlla l\'output "Sibyl"._';
+  }
+}
+
+/** Apre la webview del report nella colonna di destra (come Pynt). */
+function showReport(context: vscode.ExtensionContext, title: string, markdown: string) {
+  const panel = vscode.window.createWebviewPanel(
+    'sibylReport',
+    `Sibyl: ${title}`,
+    vscode.ViewColumn.Two,
+    { enableScripts: true, retainContextWhenHidden: true },
+  );
+
+  const templatePath = path.join(context.extensionPath, 'views', 'report.html');
+  const template = fs.readFileSync(templatePath, 'utf8');
+  const body = renderMarkdown(markdown);
+
+  panel.webview.html = template
+    .replace('__TITLE__', escapeHtml(title))
+    .replace('__CONTENT__', body);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}

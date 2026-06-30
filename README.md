@@ -179,6 +179,69 @@ front-matter YAML (model, repository, durata, tools_used, cwes_found,
 total_findings). `--report` forza un percorso specifico. Database CodeQL e SARIF
 intermedi finiscono in `server/_work/`; i checkpoint dell'agente in `agent/_work/`.
 
+## Estensione VS Code
+
+In `extension/` c'è un'estensione VS Code che fa da **telecomando** dell'agente: non
+analizza in proprio, lancia la **CLI** di Sibyl (`python -m agent <repo>`) come
+sottoprocesso e mostra il report in un pannello a destra. È utile per avviare
+un'analisi senza usare il terminale.
+
+### Installazione (uso normale)
+
+Serve **Node.js 18+**. Si crea un pacchetto `.vsix` e lo si installa una volta:
+
+```bash
+cd extension
+npm install
+npm run package                              # genera sibyl.vsix
+code --install-extension sibyl.vsix --force
+```
+
+Poi **ricarica VS Code** (*Developer: Reload Window*): l'estensione è attiva in ogni
+finestra. Al primo comando, se non trova l'installazione di Sibyl, la chiede e salva il
+percorso in **`sibyl.rootPath`**.
+
+> Da installata, l'estensione non sta più dentro la cartella di Sibyl: imposta
+> **`sibyl.rootPath`** sulla root del progetto (con venv, `sibyl.pythonPath` punta da solo
+> a `<rootPath>/.venv/bin/python`). I prerequisiti (CodeQL, `.env`, Ollama o API key) sono
+> quelli descritti sopra: l'estensione li riutilizza, non li sostituisce.
+
+### Installazione (modalità sviluppo)
+
+Per lavorare al codice dell'estensione: `npm install`, apri la cartella `extension/` in
+VS Code e premi **F5** (apre l'*Extension Development Host* coi sorgenti). In questo caso
+`sibyl.rootPath` viene dedotto in automatico.
+
+### Uso
+
+Apri una repo Python da analizzare, poi dalla **Command Palette** (`Ctrl+Shift+P`):
+
+0. **`Sibyl: Configurazione (.env)`** — apre un form per impostare i percorsi CodeQL e il
+   provider/chiavi LLM, scritti direttamente nel `.env` (alternativa user-friendly all'editing a mano).
+1. **`Sibyl: Avvia Server MCP`** — avvia il server (equivale a `MCP_TRANSPORT=sse python -m server`).
+   Se lanci l'analisi senza server attivo, l'estensione propone di avviarlo.
+2. **`Sibyl: Analizza Repository`** — esegue l'agente sulla repo aperta (o, se non c'è
+   workspace, chiede una cartella) e a fine analisi apre il **report a destra**.
+   L'avanzamento live è nel canale di output **"Sibyl"**.
+3. **`Sibyl: Ferma Server MCP`** — ferma il server avviato dall'estensione.
+
+### Impostazioni (`sibyl.*`)
+
+| Setting | Default | Significato |
+|---|---|---|
+| `sibyl.rootPath` | _(auto)_ | cartella con `agent/`/`server/` (default: padre dell'estensione, poi workspace) |
+| `sibyl.pythonPath` | _(auto)_ | interprete Python (default: `<rootPath>/.venv/bin/python`, poi `python3`) |
+| `sibyl.provider` | `auto` | backend LLM (`--provider`). `auto` = usa il `.env` (`AGENT_LLM_PROVIDER`) |
+| `sibyl.model` | _(da `.env`)_ | modello LLM (`--model`). Se vuoto usa il modello del `.env` |
+| `sibyl.mcpServerUrl` | `http://127.0.0.1:8000/sse` | URL del server MCP (`MCP_SERVER_URL`) |
+| `sibyl.manageServer` | `true` | se `true` l'estensione può avviare/fermare il server; se `false` si collega soltanto |
+| `sibyl.maxSteps` | `30` | passi massimi dell'agente (`--max-steps`) |
+
+> **Collegarsi a un server già avviato:** imposta `sibyl.mcpServerUrl` sul tuo server.
+> Se è raggiungibile, `Sibyl: Analizza Repository` lo usa senza avviarne uno nuovo. Per
+> evitare del tutto l'avvio automatico (es. server su un'altra porta/host che gestisci tu),
+> metti `sibyl.manageServer` a `false`: l'estensione si limita a connettersi.
+
 ## Test
 
 ```bash

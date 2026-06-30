@@ -1,0 +1,108 @@
+{
+  "name": "sibyl",
+  "displayName": "Sibyl - Security Agent",
+  "description": "Telecomando VSCode per l'agent di analisi sicurezza Sibyl (CodeQL + LLM via MCP)",
+  "version": "0.1.0",
+  "publisher": "sibyl",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iris-cmd22/Sibyl.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sibyl.analyzeRepository",
+        "title": "Sibyl: Analizza Repository",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "sibyl.startServer",
+        "title": "Sibyl: Avvia Server MCP"
+      },
+      {
+        "command": "sibyl.stopServer",
+        "title": "Sibyl: Ferma Server MCP"
+      },
+      {
+        "command": "sibyl.configure",
+        "title": "Sibyl: Configurazione (.env)",
+        "icon": "$(gear)"
+      }
+    ],
+    "configuration": {
+      "title": "Sibyl",
+      "properties": {
+        "sibyl.rootPath": {
+          "type": "string",
+          "default": "",
+          "description": "Percorso dell'installazione di Sibyl (la cartella che contiene agent/ e server/). Se vuoto, usa la cartella padre dell'estensione, con fallback al workspace aperto."
+        },
+        "sibyl.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Interprete Python da usare. Se vuoto, prova <rootPath>/.venv/bin/python e poi 'python3'."
+        },
+        "sibyl.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ollama",
+            "gemini",
+            "openai"
+          ],
+          "enumDescriptions": [
+            "Usa il provider configurato nel .env (AGENT_LLM_PROVIDER)",
+            "Ollama locale",
+            "Google Gemini",
+            "API OpenAI-compatibile (OpenAI/Groq/Cerebras/...)"
+          ],
+          "default": "auto",
+          "description": "Backend LLM (--provider). 'auto' non forza nulla e usa il .env del progetto."
+        },
+        "sibyl.model": {
+          "type": "string",
+          "default": "",
+          "description": "Modello da usare (--model). Se vuoto, usa il modello del .env / del provider."
+        },
+        "sibyl.mcpServerUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000/sse",
+          "description": "URL del server MCP a cui si connette l'agent (MCP_SERVER_URL). Punta qui un server già avviato per collegarti ad esso."
+        },
+        "sibyl.manageServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Se true, l'estensione può avviare/fermare il server MCP automaticamente. Se false, si collega soltanto a sibyl.mcpServerUrl (server avviato e gestito da te)."
+        },
+        "sibyl.maxSteps": {
+          "type": "number",
+          "default": 30,
+          "description": "Numero massimo di passi dell'agent (--max-steps)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src",
+    "package": "npx --yes @vscode/vsce package -o sibyl.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

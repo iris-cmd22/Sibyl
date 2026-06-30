@@ -28,3 +28,8 @@ reports/
 _smoketest_report.md
 .venv/
 __pycache__/
+
+# --- VSCode extension (Node) ---
+extension/node_modules/
+extension/out/
+extension/*.vsix
