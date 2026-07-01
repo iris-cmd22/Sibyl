@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from server.core.template import normalize_cwe
-from server.knowledge.store import CWE_CATALOG, CWE_REFERENCE
+from server.knowledge.store import CWE_CATALOG, all_cwes, lookup_catalog, lookup_cwe
 from server.transport.mcp_instance import mcp
 
 
@@ -47,7 +47,7 @@ def list_cwes() -> str:
             "tool": _tool_for(data),
             "description": data.get("description", ""),
         }
-        for cid, data in CWE_REFERENCE.items()
+        for cid, data in all_cwes().items()
     ]
     return json.dumps({
         "detectable_count": len(out),
@@ -79,12 +79,12 @@ def cwe_knowledge(cwe: str) -> str:
         cwe: CWE id, e.g. "CWE-89" (also accepts "89" or "cwe-89").
     """
     cwe_id, _, _ = normalize_cwe(cwe)
-    data = CWE_REFERENCE.get(cwe_id or cwe)
+    data = lookup_cwe(cwe_id or cwe)
     if not data:
         # Fallback: any CWE from the full catalog (official layer only). These
         # have NO automated template — report them only if analyze_database flags
         # them; do not call run_taint_query/run_api_misuse_query for them.
-        cat = CWE_CATALOG.get(cwe_id or cwe)
+        cat = lookup_catalog(cwe_id or cwe)
         if cat:
             return json.dumps({
                 "cwe": cwe_id,
@@ -102,7 +102,7 @@ def cwe_knowledge(cwe: str) -> str:
             }, indent=2)
         return json.dumps({
             "error": f"No entry for {cwe!r}",
-            "detectable": list(CWE_REFERENCE.keys()),
+            "detectable": list(all_cwes().keys()),
         })
     # Two distinct layers: the official "what it is" and our "what to do".
     page = {

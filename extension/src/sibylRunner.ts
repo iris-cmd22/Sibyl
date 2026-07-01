@@ -8,6 +8,31 @@ import { RunOptions, RunResult, SibylConfig } from './types';
 
 let serverProcess: cp.ChildProcess | undefined;
 
+/** Prefisso delle righe di avanzamento STRUTTURATE emesse dall'agent (progress.py). */
+const SIBYL_EVENT_MARKER = '@@SIBYL@@';
+
+/**
+ * Costruisce un gestore di 'data' che accumula i chunk e li spezza in RIGHE
+ * complete (l'output di un processo non arriva allineato ai newline). Ogni riga
+ * viene passata a onLine.
+ */
+function lineSplitter(onLine: (line: string) => void): { push: (d: Buffer) => void; end: () => void } {
+  let buf = '';
+  return {
+    push(d: Buffer) {
+      buf += d.toString();
+      let idx: number;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        onLine(buf.slice(0, idx).replace(/\r$/, ''));
+        buf = buf.slice(idx + 1);
+      }
+    },
+    end() {
+      if (buf.length) { onLine(buf.replace(/\r$/, '')); buf = ''; }
+    },
+  };
+}
+
 /**
  * Risolve la configurazione dell'estensione in valori concreti.
  * @param extensionPath cartella dell'estensione (per dedurre rootPath di default).
@@ -130,6 +155,7 @@ export function runAgent(
   options: RunOptions,
   channel: vscode.OutputChannel,
   token?: vscode.CancellationToken,
+  onEvent?: (evt: any) => void,
 ): Promise<RunResult> {
   const args = ['-m', 'agent', options.repoPath,
     '--report', options.reportPath, '--max-steps', String(config.maxSteps)];
@@ -147,7 +173,9 @@ export function runAgent(
   return new Promise((resolve, reject) => {
     const proc = cp.spawn(config.pythonPath, args, {
       cwd: config.rootPath,
-      env: childEnv(config),
+      // SIBYL_PROGRESS_EVENTS=1 => l'agent emette gli eventi strutturati che la
+      // webview grafica disegna (le righe umane restano nel canale di output).
+      env: childEnv(config, { SIBYL_PROGRESS_EVENTS: '1' }),
     });
 
     token?.onCancellationRequested(() => {
@@ -155,8 +183,23 @@ export function runAgent(
       proc.kill();
     });
 
-    proc.stdout?.on('data', (d) => channel.append(d.toString()));
-    proc.stderr?.on('data', (d) => channel.append(d.toString()));
+    // Righe con il MARKER = eventi (vanno alla webview); tutte le altre = log nel canale.
+    const onLine = (line: string) => {
+      if (onEvent && line.startsWith(SIBYL_EVENT_MARKER)) {
+        try {
+          onEvent(JSON.parse(line.slice(SIBYL_EVENT_MARKER.length).trim()));
+        } catch {
+          /* riga di evento malformata: la si ignora */
+        }
+        return;
+      }
+      channel.appendLine(line);
+    };
+    const out = lineSplitter(onLine);
+    const err = lineSplitter(onLine);
+
+    proc.stdout?.on('data', (d) => out.push(d));
+    proc.stderr?.on('data', (d) => err.push(d));
 
     proc.on('error', (err) => {
       channel.appendLine(`[agent] errore di avvio: ${err.message}`);
@@ -164,6 +207,8 @@ export function runAgent(
     });
 
     proc.on('exit', (code) => {
+      out.end();
+      err.end();
       channel.appendLine(`[agent] terminato (exit ${code}).`);
       resolve({ exitCode: code ?? -1, reportPath: options.reportPath });
     });

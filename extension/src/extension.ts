@@ -6,6 +6,7 @@ import * as path from 'path';
 import { isServerUp, resolveConfig, runAgent, startServer, stopServer } from './sibylRunner';
 import { renderMarkdown } from './markdown';
 import { envFilePath, readEnvValues, renderConfigHtml, writeEnvValues } from './envConfig';
+import { createProgressPanel } from './progressView';
 
 let channel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
@@ -163,6 +164,9 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
   const reportPath = path.join(os.tmpdir(), `sibyl-report-${Date.now()}.md`);
   channel.show(true);
 
+  // Vista grafica di avanzamento (al posto dei log): riceve gli eventi dell'agent.
+  const progressPanel = createProgressPanel(context, path.basename(repoPath));
+
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -171,7 +175,10 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
     },
     async (_progress, token) => {
       try {
-        const result = await runAgent(config, { repoPath, reportPath }, channel, token);
+        const result = await runAgent(
+          config, { repoPath, reportPath }, channel, token,
+          (evt) => progressPanel.update(evt),
+        );
         if (token.isCancellationRequested) {
           return;
         }

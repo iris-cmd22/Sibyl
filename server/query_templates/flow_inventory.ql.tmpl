@@ -1,0 +1,46 @@
+/**
+ * @name Flow inventory (untrusted input reachability)
+ * @description CWE-agnostic taint reachability. Reports EVERY flow from a
+ *              remote/untrusted source to the argument of ANY call. No
+ *              vulnerability class is assumed and no CWE is stamped: the goal is
+ *              to surface all the flows the untrusted data takes, so the agent
+ *              (Detection phase) can judge which sinks are dangerous without
+ *              being biased by standard CWE-tagged queries.
+ * @kind path-problem
+ * @problem.severity recommendation
+ * @security-severity 1.0
+ * @id py/flow-inventory{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.dataflow.new.TaintTracking
+import semmle.python.dataflow.new.RemoteFlowSources
+import semmle.python.Concepts
+
+module FlowInventoryCfg implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node node) {
+    // Broadest threat-model input model: remote + local + environment +
+    // command-line + file + database. This surfaces flows from NON-HTTP and
+    // second-order inputs too (not only RemoteFlowSource), so vulnerabilities in
+    // internal/helper functions are covered. Still an INPUT model, not a CWE.
+    node instanceof ThreatModelSource
+  }
+
+  predicate isSink(DataFlow::Node node) {
+    // Any argument of any call is a candidate sink. We do NOT commit to a
+    // vulnerability class (no name list, no concept) — we only surface where
+    // untrusted data ends up "doing something".
+    exists(DataFlow::CallCfgNode call | node = call.getArg(_))
+  }
+}
+
+module FlowInventory = TaintTracking::Global<FlowInventoryCfg>;
+
+import FlowInventory::PathGraph
+
+from FlowInventory::PathNode source, FlowInventory::PathNode sink
+where FlowInventory::flowPath(source, sink)
+select sink.getNode(), source, sink,
+  "Untrusted input reaches this call argument from $@.", source.getNode(), "an untrusted source"

@@ -17,11 +17,19 @@ import pytest
 
 from agent.clients.openai_compat import _to_openai
 from agent.clients.ollama import plain
+from agent.phases import DETECTION, VALIDATION, filter_tools
 from agent.report import RunStats, default_report_path, slug
 from agent.robustness.checkpoint import save_checkpoint
 from agent.robustness.dbpath import resolve_db_path
 from agent.robustness.toolcalls import _balanced_objects, extract_text_tool_calls
 from agent.source import resolve_source
+from agent.worklist import WorkList
+
+
+class _Tool:
+    """Minimal stand-in for an MCP tool definition (only `.name` is used)."""
+    def __init__(self, name: str):
+        self.name = name
 
 
 # --------------------------------------------------------------------------- #
@@ -131,3 +139,53 @@ def test_resolve_source_zip(tmp_path: Path):
         z.write(src / "a.py", "a.py")
     out = Path(resolve_source(str(zpath)))
     assert out.is_dir() and (out / "a.py").exists()
+
+
+# --------------------------------------------------------------------------- #
+# phases: filtering keeps only the names allowed (the allow-list comes from the
+# SERVER via list_phase_tools; here we unit-test the pure filter).
+# --------------------------------------------------------------------------- #
+def test_filter_tools_keeps_only_allowed():
+    tools = [_Tool(n) for n in ["find_all_flows", "run_taint_query", "cwe_knowledge"]]
+    kept = {t.name for t in filter_tools(tools, {"find_all_flows", "cwe_knowledge"})}
+    assert kept == {"find_all_flows", "cwe_knowledge"}
+    # empty allow-list -> nothing passes (orchestrator handles the degrade case)
+    assert filter_tools(tools, set()) == []
+    assert DETECTION == "detection" and VALIDATION == "validation"
+
+
+# --------------------------------------------------------------------------- #
+# worklist: the Detection -> Validation flow-inventory handoff (Claim Check)
+# --------------------------------------------------------------------------- #
+def test_worklist_candidates_dedup():
+    wl = WorkList(repo_path="/r", db_path="/db")
+    wl.add_candidates({"flows": [
+        {"source": {"file": "a.py", "line": 3}, "sink": {"file": "a.py", "line": 18},
+         "sink_hint": "sql", "steps": 8},
+        {"source": {"file": "a.py", "line": 3}, "sink": {"file": "a.py", "line": 18},
+         "sink_hint": "dup", "steps": 8},
+    ]})
+    assert len(wl.candidates) == 1
+    assert "a.py:3" in wl.detection_summary()
+
+
+def test_worklist_operations_dedup_and_summary():
+    wl = WorkList(repo_path="/r", db_path="/db")
+    wl.add_operations({"operations": [
+        {"kind": "weak-call", "file": "c.py", "line": 3},
+        {"kind": "weak-call", "file": "c.py", "line": 3},   # dup
+        {"kind": "config-flag", "file": "a.py", "line": 8},
+    ]})
+    assert len(wl.operations) == 2
+    s = wl.detection_summary()
+    assert "SENSITIVE OPERATIONS" in s and "weak-call @ c.py:3" in s
+
+
+def test_worklist_roundtrip():
+    wl = WorkList(repo_path="/r", db_path="/db")
+    wl.add_candidates({"flows": [{"source": {"file": "a.py", "line": 1},
+                                  "sink": {"file": "a.py", "line": 9},
+                                  "sink_hint": "", "steps": 2}]})
+    wl.add_operations({"operations": [{"kind": "weak-call", "file": "c.py", "line": 3}]})
+    back = WorkList.from_dict(wl.to_dict())
+    assert back.db_path == "/db" and len(back.candidates) == 1 and len(back.operations) == 1

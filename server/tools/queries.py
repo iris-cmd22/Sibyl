@@ -6,7 +6,7 @@ from pathlib import Path
 
 from server.core.executor import analyze_with_query, render_and_analyze
 from server.core.template import normalize_cwe, render_consts, render_names, is_valid_name
-from server.knowledge.store import CWE_REFERENCE
+from server.knowledge.store import lookup_cwe
 from server.transport.mcp_instance import mcp
 
 
@@ -76,7 +76,7 @@ def run_taint_query(
         return json.dumps({"error": f"invalid names (must be identifiers): {bad}"})
 
     cwe_id = normalize_cwe(cwe)[0]
-    ref = CWE_REFERENCE.get(cwe_id, {}) if cwe_id else {}
+    ref = (lookup_cwe(cwe_id) or {}) if cwe_id else {}
     return render_and_analyze(
         db_path, "taint_namebased.ql.tmpl",
         {
@@ -135,7 +135,7 @@ def run_api_misuse_query(
         return json.dumps({"error": f"invalid call names (must be identifiers): {bad}"})
 
     cwe_id = normalize_cwe(cwe)[0]
-    ref = CWE_REFERENCE.get(cwe_id, {}) if cwe_id else {}
+    ref = (lookup_cwe(cwe_id) or {}) if cwe_id else {}
     return render_and_analyze(
         db_path, "api_misuse_namebased.ql.tmpl",
         {
@@ -152,3 +152,156 @@ def run_api_misuse_query(
             "bad_constants": bad_constants or [],
         },
     )
+
+
+# Obiettivo: dare alla fase di DETECTION "tutti i flow disponibili" nel codice in modo
+#            CWE-agnostico: ogni percorso da un input non fidato (RemoteFlowSource) fino
+#            all'argomento di una qualsiasi chiamata, SENZA assumere una classe di vuln.
+# Input:    db_path = database; max_flows = quanti flow (dedotti) restituire al massimo.
+# Output:   stringa JSON compatta con l'inventario dei flow (source/sink file:line, passi);
+#           NESSUna etichetta CWE (per non dare bias all'LLM).
+# Come realizzato: esegue il template "flow_inventory.ql.tmpl" con cwe="" (i segnaposto
+#            CWE si svuotano), poi deduplica per (source, sink), tronca a max_flows e
+#            riassume. L'inventario completo (SARIF) resta su disco (Claim Check).
+@mcp.tool()
+def find_all_flows(db_path: str, max_flows: int = 200) -> str:
+    """List ALL data-flows from untrusted input to any call argument (CWE-agnostic).
+
+    This is the Detection-phase tool: it surfaces every flow the untrusted data
+    takes WITHOUT committing to a vulnerability class (no CWE, no standard query),
+    so the model is not biased. Source = RemoteFlowSource (where external input
+    enters). Sink = the argument of ANY call (a structural "something happens
+    here"). You then judge which sinks are dangerous and VERIFY them in Validation.
+
+    Args:
+        db_path: Path returned by create_codeql_database.
+        max_flows: Max number of (deduplicated) flows to return (default 200).
+    """
+    raw = render_and_analyze(
+        db_path, "flow_inventory.ql.tmpl", {}, out_prefix="flowinv", cwe="",
+    )
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return raw
+    if "error" in payload:
+        return raw
+
+    seen: set = set()
+    flows: list[dict] = []
+    for f in payload.get("findings", []) or []:
+        src = f.get("source") or {}
+        snk = f.get("sink") or {}
+        key = (src.get("file"), src.get("line"), snk.get("file"), snk.get("line"))
+        if key in seen:
+            continue
+        seen.add(key)
+        flows.append({
+            "source": {"file": src.get("file"), "line": src.get("line")},
+            "sink": {"file": snk.get("file"), "line": snk.get("line")},
+            "sink_hint": (snk.get("note") or "")[:120],
+            "steps": f.get("flow_steps", 0),
+        })
+
+    total = len(flows)
+    return json.dumps({
+        "flow_count": total,
+        "returned": min(total, max_flows),
+        "truncated": total > max_flows,
+        "flows": flows[:max_flows],
+        "note": "CWE-agnostic flow inventory: untrusted input -> a call argument. "
+                "No vulnerability class is implied. Decide which sinks are dangerous "
+                "and VERIFY them in Validation (run_taint_query with cwe + refined names).",
+    }, indent=2)
+
+
+# La crypto e' rilevata semanticamente dal Concept Cryptography::CryptographicOperation
+# nel template. Il name-based resta SOLO come rete per cio' che CodeQL non modella come
+# Concept: la randomness insicura (e, in fallback, la deserializzazione). Nomi presi
+# dalla wiki (CWE-330) uniti a pochi default.
+_WEAK_CWES = ("CWE-330",)
+_WEAK_DEFAULTS = [
+    "random", "randint", "randrange", "uniform", "getrandbits", "choice",
+    "loads", "load",
+]
+# Keyword-argument "di sicurezza" la cui presenza con un literal va segnalata.
+_FLAG_PARAM_DEFAULTS = [
+    "verify", "shell", "autoescape", "debug", "secure", "httponly",
+    "samesite", "check_hostname", "ssl_verify",
+]
+
+
+# Obiettivo: dare alla DETECTION un inventario delle OPERAZIONI SENSIBILI presenti nel
+#            codice A PRESCINDERE dal flusso (crypto/hash/random deboli, exec/comandi,
+#            deserializzazione, config-flag), così un modello piccolo non deve accorgersene
+#            da solo. CWE-agnostico: ogni voce ha un `kind` strutturale, mai un CWE.
+# Input:    db_path = database; max_ops = quante operazioni (dedotte) restituire.
+# Output:   stringa JSON compatta {op_count, by_kind, operations:[{kind,file,line}]}.
+# Come realizzato: raccoglie i nomi deboli dalla wiki (via lookup_cwe) uniti ai default,
+#            rende "sensitive_ops.ql.tmpl" con cwe="" (niente tag CWE), poi deduplica per
+#            (kind,file,line), raggruppa per kind e tronca.
+@mcp.tool()
+def find_sensitive_operations(db_path: str, max_ops: int = 200) -> str:
+    """List security-sensitive operations in the code, REGARDLESS of data flow.
+
+    This is the Detection companion to find_all_flows: it surfaces the "non-flow"
+    signals a small model easily misses. Most kinds come from CodeQL's SEMANTIC models
+    (Concepts), not name matching: command-exec, code-exec, sql-exec, filesystem,
+    decoding, and `crypto` (Cryptography::CryptographicOperation, which resolves
+    hashlib/cryptography/Cryptodome). Only `weak-call` (insecure randomness — CodeQL
+    has no Concept for it) and `config-flag` (a kwarg like verify=/shell=/debug= set to
+    a literal) are name/structure based. Each item has a `kind` + file:line, never a
+    CWE. Use it to decide which api-misuse / insecure-config checks to run in Validation.
+
+    Args:
+        db_path: Path returned by create_codeql_database.
+        max_ops: Max number of (deduplicated) operations to return (default 200).
+    """
+    weak: list[str] = list(_WEAK_DEFAULTS)
+    for cid in _WEAK_CWES:
+        ref = lookup_cwe(cid) or {}
+        weak += ref.get("weak_call_names", []) or []
+        weak += ref.get("bad_constants", []) or []
+    # dedup preserving order (render_names re-validates identifiers)
+    weak = list(dict.fromkeys(weak))
+
+    raw = render_and_analyze(
+        db_path, "sensitive_ops.ql.tmpl",
+        {
+            "{{WEAK_CALL_NAMES}}": render_names(weak),
+            "{{FLAG_PARAM_NAMES}}": render_names(_FLAG_PARAM_DEFAULTS),
+        },
+        out_prefix="sensops", cwe="",
+    )
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return raw
+    if "error" in payload:
+        return raw
+
+    seen: set = set()
+    ops: list[dict] = []
+    by_kind: dict[str, int] = {}
+    for f in payload.get("findings", []) or []:
+        kind = (f.get("message") or "op").strip()
+        file, line = f.get("file"), f.get("line")
+        key = (kind, file, line)
+        if key in seen:
+            continue
+        seen.add(key)
+        ops.append({"kind": kind, "file": file, "line": line})
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    total = len(ops)
+    return json.dumps({
+        "op_count": total,
+        "returned": min(total, max_ops),
+        "truncated": total > max_ops,
+        "by_kind": by_kind,
+        "operations": ops[:max_ops],
+        "note": "CWE-agnostic inventory of sensitive operations (no data-flow needed). "
+                "Each `kind` says WHAT kind of operation, never a CWE. In Validation, "
+                "verify these with run_api_misuse_query / run_insecure_config_flag_query "
+                "/ check_* and associate the CWE from the evidence.",
+    }, indent=2)

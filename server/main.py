@@ -13,7 +13,7 @@ from __future__ import annotations
 from server import config
 from server.log import get_logger, instrument_tool_calls
 # Static tools — import for their @mcp.tool() registration side effects.
-from server.tools import filesystem, database, queries, config_flags, knowledge  # noqa: F401
+from server.tools import filesystem, database, queries, config_flags, knowledge, meta  # noqa: F401
 # Dynamic check_* tools — import for registration side effects.
 from server.registry import loader  # noqa: F401
 from server.transport.mcp_instance import mcp

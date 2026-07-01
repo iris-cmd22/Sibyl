@@ -29,3 +29,40 @@ def load_json(path: Path) -> dict:
 
 CWE_REFERENCE = load_json(config.CWE_WIKI_PATH)
 CWE_CATALOG = load_json(config.CWE_CATALOG_PATH)
+
+
+# --------------------------------------------------------------------------- #
+# Knowledge access SEAM. Today the knowledge lives in the JSON "wiki"; tomorrow
+# a knowledge graph can replace it. Everything that needs CWE knowledge at
+# runtime (queries.py, knowledge.py) goes through THESE functions, so swapping
+# the backend means re-implementing only them (same signatures).
+# --------------------------------------------------------------------------- #
+
+# Obiettivo: punto d'accesso UNICO alla conoscenza operativa di un CWE (la "wiki").
+# Input:    cwe_id = id normalizzato (es. "CWE-89").
+# Output:   il dict della voce wiki, oppure None se non presente.
+# Come realizzato: oggi una semplice lookup sul dict CWE_REFERENCE; domani basta
+#            sostituire il corpo con una query al knowledge graph.
+def lookup_cwe(cwe_id: str | None) -> dict | None:
+    if not cwe_id:
+        return None
+    return CWE_REFERENCE.get(cwe_id)
+
+
+# Obiettivo: fallback al catalogo MITRE completo (solo livello "ufficiale") per i CWE
+#            che non hanno una scheda operativa nella wiki.
+# Input:    cwe_id = id normalizzato.
+# Output:   il dict del catalogo, oppure None.
+# Come realizzato: lookup sul dict CWE_CATALOG (anch'esso sostituibile in futuro).
+def lookup_catalog(cwe_id: str | None) -> dict | None:
+    if not cwe_id:
+        return None
+    return CWE_CATALOG.get(cwe_id)
+
+
+# Obiettivo: elencare tutte le voci della wiki (per list_cwes), dietro la stessa cucitura.
+# Input:    nessuno.
+# Output:   dict {cwe_id: voce}.
+# Come realizzato: ritorna CWE_REFERENCE; un backend a grafo ne fornirebbe l'equivalente.
+def all_cwes() -> dict:
+    return CWE_REFERENCE

@@ -22,7 +22,7 @@ from server import config
 from server.core import sarif, template
 from server.knowledge import store
 from server.registry import loader
-from server.tools import config_flags, database, knowledge, queries
+from server.tools import config_flags, database, knowledge, meta, queries
 from server.transport.mcp_instance import mcp
 
 # Import the package entry point for its assembly side effects: this loads every
@@ -376,3 +376,97 @@ def test_generic_insecure_config_clean_repo(clean_repo):
         db, module="requests", functions=["get"],
         param_name="verify", insecure_value="false", cwe="CWE-295"))
     assert r["finding_count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# UNIT: Detection flow inventory + knowledge seam
+# --------------------------------------------------------------------------- #
+def test_flow_inventory_tool_registered():
+    names = _registered_tool_names()
+    assert "find_all_flows" in names               # Detection: flow inventory
+    assert "find_sensitive_operations" in names    # Detection: non-flow inventory
+
+
+def test_list_phase_tools_is_source_of_truth():
+    # The SERVER owns the tool -> phase mapping (the agent does not hardcode it).
+    data = json.loads(meta.list_phase_tools())
+    assert set(data) == {"detection", "validation"}
+    # Detection = read + build DB + the two CWE-agnostic inventories.
+    assert {"find_all_flows", "find_sensitive_operations",
+            "create_codeql_database"} <= set(data["detection"])
+    # Validation = targeted queries + knowledge, and the check_* shortcuts are
+    # auto-included (previously they were wrongly excluded).
+    assert "run_taint_query" in data["validation"]
+    assert any(n.startswith("check_") for n in data["validation"])
+    # Detection cannot run targeted queries; Validation cannot enumerate signals.
+    assert "run_taint_query" not in data["detection"]
+    assert "find_all_flows" not in data["validation"]
+    # The meta-tool itself is exposed to no phase (only the orchestrator calls it).
+    assert "list_phase_tools" not in data["detection"] + data["validation"]
+
+
+def test_knowledge_seam_lookup():
+    # The single access point used by queries.py/knowledge.py (graph-swappable).
+    assert store.all_cwes() is store.CWE_REFERENCE
+    assert store.lookup_cwe("CWE-89") == store.CWE_REFERENCE.get("CWE-89")
+    assert store.lookup_cwe(None) is None
+    assert store.lookup_cwe("CWE-does-not-exist") is None
+
+
+def test_find_all_flows_without_db_errors():
+    # render_and_analyze reports the missing DB; find_all_flows surfaces it.
+    r = json.loads(queries.find_all_flows("/no/such/db"))
+    assert "error" in r
+
+
+@pytest.mark.codeql
+def test_flow_inventory_template_compiles():
+    import subprocess
+    tmpl = (config.TEMPLATE_DIR / "flow_inventory.ql.tmpl").read_text(encoding="utf-8")
+    # CWE-agnostic: the CWE placeholders render to empty (no class stamped).
+    rendered = tmpl.replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", "")
+    assert "external/cwe" not in rendered  # no CWE tag -> no bias
+    config.GENERATED_DIR.mkdir(exist_ok=True)
+    out = config.GENERATED_DIR / "test_flow_inventory_compile.ql"
+    out.write_text(rendered, encoding="utf-8")
+    rc = subprocess.run(
+        [config.CODEQL_BIN, "query", "compile", str(out),
+         f"--search-path={config.CODEQL_SEARCH_PATH}"],
+        capture_output=True, text=True, timeout=config.CODEQL_TIMEOUT,
+    )
+    out.unlink(missing_ok=True)
+    assert rc.returncode == 0, rc.stderr[-1000:]
+
+
+@pytest.mark.codeql
+def test_sensitive_ops_template_compiles():
+    import subprocess
+    tmpl = (config.TEMPLATE_DIR / "sensitive_ops.ql.tmpl").read_text(encoding="utf-8")
+    rendered = (tmpl.replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", "")
+                    .replace("{{WEAK_CALL_NAMES}}", template.render_names(["md5", "random"]))
+                    .replace("{{FLAG_PARAM_NAMES}}", template.render_names(["verify", "shell"])))
+    assert "external/cwe" not in rendered  # CWE-agnostic inventory
+    config.GENERATED_DIR.mkdir(exist_ok=True)
+    out = config.GENERATED_DIR / "test_sensitive_ops_compile.ql"
+    out.write_text(rendered, encoding="utf-8")
+    rc = subprocess.run(
+        [config.CODEQL_BIN, "query", "compile", str(out),
+         f"--search-path={config.CODEQL_SEARCH_PATH}"],
+        capture_output=True, text=True, timeout=config.CODEQL_TIMEOUT,
+    )
+    out.unlink(missing_ok=True)
+    assert rc.returncode == 0, rc.stderr[-1000:]
+
+
+@pytest.mark.codeql
+def test_find_sensitive_operations_finds_crypto_without_flow(vuln_db):
+    # crypto_util.py uses hashlib.md5 / hashlib.new('sha1') with NO data-flow:
+    # find_all_flows would miss them; find_sensitive_operations must surface them.
+    r = json.loads(queries.find_sensitive_operations(vuln_db))
+    assert r["op_count"] >= 1
+    crypto_ops = [o for o in r["operations"] if "crypto_util.py" in (o.get("file") or "")]
+    assert crypto_ops, "expected a sensitive op in crypto_util.py"
+    # Detected via the SEMANTIC crypto Concept (kind 'crypto'), not name matching.
+    assert any(o["kind"] == "crypto" for o in crypto_ops)
+    # CWE-agnostic: kinds are structural, never a CWE id.
+    assert all("CWE" not in (o.get("kind") or "") for o in r["operations"])
