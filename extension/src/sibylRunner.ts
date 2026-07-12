@@ -51,11 +51,16 @@ export function resolveConfig(extensionPath: string): SibylConfig {
     }
   }
 
-  // pythonPath: setting esplicito → .venv del rootPath → 'python3'.
+  // pythonPath: setting esplicito → .venv del rootPath (Windows/Unix) → fallback.
   let pythonPath = (cfg.get<string>('pythonPath') || '').trim();
   if (!pythonPath) {
-    const venvPy = path.join(rootPath, '.venv', 'bin', 'python');
-    pythonPath = fs.existsSync(venvPy) ? venvPy : 'python3';
+    const candidatePaths = [
+      path.join(rootPath, '.venv', 'Scripts', 'python.exe'),
+      path.join(rootPath, '.venv', 'Scripts', 'python'),
+      path.join(rootPath, '.venv', 'bin', 'python'),
+    ];
+    const venvPython = candidatePaths.find((candidate) => fs.existsSync(candidate));
+    pythonPath = venvPython || 'python';
   }
 
   return {

@@ -55,6 +55,10 @@ module TaintCfg implements DataFlow::ConfigSig {
     |
       node = call.getArg(_)
     )
+    // Optional: reuse a CodeQL semantic Concept (already vetted for ORMs/driver
+    // aliases in Detection) as the sink, instead of re-deriving names by hand.
+    // Empty when the caller didn't pass sink_concept.
+    {{SINK_CONCEPT_CLAUSE}}
   }
 }
 

@@ -1,0 +1,18 @@
+/**
+ * @name Decoding operations inventory
+ * @description CWE-agnostic inventory of decoding calls (e.g. base64, pickle, marshal),
+ *              surfaced regardless of data flow. Often a precursor to unsafe
+ *              deserialization. No vulnerability class is assumed: the agent decides
+ *              in Validation whether untrusted input reaches this call.
+ * @kind problem
+ * @problem.severity recommendation
+ * @security-severity 1.0
+ * @id py/decoding-inventory{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.Concepts
+
+from Decoding call
+select call, "decoding"

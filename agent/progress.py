@@ -69,6 +69,17 @@ class Progress:
     def counts(self, candidates: int, findings: int, cwes: int) -> None:
         self._emit(t="counts", candidates=candidates, findings=findings, cwes=cwes)
 
+    # Obiettivo: segnalare un finding appena confermato (Validation), con la catena
+    #            hop-by-hop gia' calcolata da CodeQL (source -> ... -> sink), cosi' la
+    #            webview puo' disegnarla invece di aspettare il report finale.
+    # Input:    cwe/rule_id = classificazione; file/line = posizione principale (il sink,
+    #           o file/line del finding se non e' un flow); flow_path = lista di
+    #           {file, line, note?} gia' pronta (server/core/sarif.py:extract_flow).
+    def finding(self, cwe: str | None, rule_id: str | None, file: str | None,
+                line: int | None, flow_path: list[dict]) -> None:
+        self._emit(t="finding", cwe=cwe, rule_id=rule_id, file=file, line=line,
+                    flow_path=flow_path)
+
     # Obiettivo: segnalare la fine, con il percorso del report e i totali finali.
     def done(self, report: str, candidates: int, findings: int, cwes: int) -> None:
         self._emit(t="done", report=report, candidates=candidates,

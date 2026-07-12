@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find 'C:\\\\Users\\\\ladyc\\\\Documents\\\\TRAINEESHIP\\\\vscode-codeql-starter\\\\ql/python/ql/src/Expressions' -iname *regex* -o -iname *Regex*)",
+      "Bash(python -c \"from agent.prompts import DETECTION_PROMPT, VALIDATION_PROMPT, TOOL_CALL_FORMAT; print\\('OK'\\); print\\(len\\(DETECTION_PROMPT\\)\\); print\\(len\\(VALIDATION_PROMPT\\)\\); assert 'TOOL-CALL FORMAT' in DETECTION_PROMPT; assert 'TOOL-CALL FORMAT' in VALIDATION_PROMPT; print\\('interpolation OK'\\)\")",
+      "Bash(nvidia-smi)",
+      "Bash(ollama ps *)",
+      "Bash(ollama list *)",
+      "PowerShell(Get-CimInstance Win32_VideoController)",
+      "Bash(ollama show *)",
+      "PowerShell(\\(Get-CimInstance Win32_Processor | Select-Object -First 1\\).NumberOfCores; \\(Get-CimInstance Win32_Processor | Select-Object -First 1\\).NumberOfLogicalProcessors; [Environment]::GetEnvironmentVariable\\(\"OLLAMA_NUM_THREAD\",\"Machine\"\\); [Environment]::GetEnvironmentVariable\\(\"OLLAMA_KEEP_ALIVE\",\"Machine\"\\); [Environment]::GetEnvironmentVariable\\(\"OLLAMA_FLASH_ATTENTION\",\"Machine\"\\))",
+      "Bash(python -c \"from agent.prompts import DETECTION_PROMPT, VALIDATION_PROMPT; assert '<tool_call>' in DETECTION_PROMPT; assert '<tool_call>' in VALIDATION_PROMPT; print\\('OK'\\)\")",
+      "Bash(setx OLLAMA_KEEP_ALIVE \"30m\")",
+      "Bash(setx OLLAMA_FLASH_ATTENTION \"1\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('agent/orchestrator.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"from agent.prompts import DETECTION_PROMPT, VALIDATION_PROMPT; print\\('DETECTION len', len\\(DETECTION_PROMPT\\)\\); print\\('VALIDATION len', len\\(VALIDATION_PROMPT\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"from agent.prompts import VALIDATION_PROMPT; print\\('OK'\\); print\\(VALIDATION_PROMPT[-900:]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python \"C:\\\\Users\\\\ladyc\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-ladyc-Documents-GitHub-Sibyl\\\\112dcb26-0e75-4915-8caa-ea3946432007\\\\scratchpad\\\\test_toolcalls.py\")",
+      "Bash(PYTHONPATH=\"c:\\\\Users\\\\ladyc\\\\Documents\\\\GitHub\\\\Sibyl\" python \"C:\\\\Users\\\\ladyc\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-ladyc-Documents-GitHub-Sibyl\\\\112dcb26-0e75-4915-8caa-ea3946432007\\\\scratchpad\\\\test_toolcalls.py\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\)\\) for f in ['agent/robustness/toolcalls.py','agent/orchestrator.py','agent/prompts.py','server/core/sarif.py']]; print\\('tutti i file compilano'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('agent/report.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('agent/orchestrator.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('agent/prompts.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -m pytest agent/tests/test_agent.py -q)",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
+      "PowerShell(python -m agent _smoketest_repo --provider ollama --model qwen2.5-coder:14b)",
+      "Bash(python -c \"from agent.orchestrator import _strip_leftover_table, _cited_cwes; print\\('OK'\\)\")",
+      "Bash(python -m pytest -m \"not codeql and not llm\" -q)"
+    ]
+  }
+}

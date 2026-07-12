@@ -23,6 +23,20 @@ def db_path_for(repo_path: str) -> Path:
     return config.WORK_DIR / f"db_{name}_{digest}"
 
 
+# Obiettivo: impedire che un db_path fornito dal modello punti a una directory
+#            qualsiasi del filesystem — deve essere una cartella dentro WORK_DIR,
+#            cioe' un database creato (o creabile) da questo stesso server.
+# Input:    db_path = il percorso da verificare.
+# Output:   True se db_path e' contenuto in WORK_DIR, False altrimenti.
+# Come realizzato: risolve entrambi i percorsi e verifica il contenimento (stesso
+#            pattern anti-traversal usato per repo_path in read_file_snippet).
+def is_contained_db_path(db_path: str) -> bool:
+    try:
+        return Path(db_path).resolve().is_relative_to(config.WORK_DIR.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 # Obiettivo: eseguire UNA query .ql su un database CodeQL e restituire i finding
 #            già puliti. È la routine condivisa da quasi tutti i tool di query.
 # Input:    db_path = percorso del database; query_file = il file .ql da eseguire;
@@ -32,6 +46,8 @@ def db_path_for(repo_path: str) -> Path:
 # Come realizzato: valida i percorsi, lancia "codeql database analyze" via runner.run,
 #            converte il SARIF con parse_sarif, e impacchetta tutto in JSON.
 def analyze_with_query(db_path: str, query_file: Path, extra: dict | None = None) -> str:
+    if not is_contained_db_path(db_path):
+        return json.dumps({"error": f"db_path must be inside WORK_DIR: {db_path}"})
     db = Path(db_path)
     if not db.is_dir():
         return json.dumps({"error": f"DB not found: {db_path}"})

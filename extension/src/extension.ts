@@ -165,7 +165,7 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
   channel.show(true);
 
   // Vista grafica di avanzamento (al posto dei log): riceve gli eventi dell'agent.
-  const progressPanel = createProgressPanel(context, path.basename(repoPath));
+  const progressPanel = createProgressPanel(context, path.basename(repoPath), repoPath);
 
   await vscode.window.withProgress(
     {
@@ -235,11 +235,15 @@ function readReport(reportPath: string): string {
 
 /** Apre la webview del report nella colonna di destra (come Pynt). */
 function showReport(context: vscode.ExtensionContext, title: string, markdown: string) {
+  // No script needed: the report is static, pre-rendered HTML (renderMarkdown below).
+  // Scripts stay disabled so that HTML/markup surviving into the report (e.g. from the
+  // model's free-text commentary, which ultimately derives from the analyzed repo's
+  // source code) can never execute as JS in this webview.
   const panel = vscode.window.createWebviewPanel(
     'sibylReport',
     `Sibyl: ${title}`,
     vscode.ViewColumn.Two,
-    { enableScripts: true, retainContextWhenHidden: true },
+    { enableScripts: false, retainContextWhenHidden: true },
   );
 
   const templatePath = path.join(context.extensionPath, 'views', 'report.html');
@@ -252,5 +256,5 @@ function showReport(context: vscode.ExtensionContext, title: string, markdown: s
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

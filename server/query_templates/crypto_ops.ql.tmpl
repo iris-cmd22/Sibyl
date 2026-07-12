@@ -1,0 +1,18 @@
+/**
+ * @name Cryptographic operations inventory
+ * @description CWE-agnostic inventory of cryptographic operations (resolves hashlib /
+ *              cryptography / Cryptodome imports and aliases semantically). Reports
+ *              ANY crypto operation, weak or strong: the weak/strong judgement is left
+ *              to Validation, so this inventory stays CWE-agnostic.
+ * @kind problem
+ * @problem.severity recommendation
+ * @security-severity 1.0
+ * @id py/crypto-ops-inventory{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.Concepts
+
+from Cryptography::CryptographicOperation call
+select call, "crypto"

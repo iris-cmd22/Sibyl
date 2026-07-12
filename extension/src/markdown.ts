@@ -3,7 +3,11 @@
 // grassetto/corsivo, link, citazioni, righe orizzontali e frontmatter YAML.
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Anche il doppio apice va sfuggito: senza, un URL o testo malevolo (es. dal
+  // commento libero del modello, che ha letto codice non fidato) potrebbe chiudere
+  // anticipatamente l'attributo href="..." costruito in inline() e iniettare markup
+  // (XSS) nella webview, che ha enableScripts: true.
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /** Rende inline una riga: escape + code/bold/italic/link. */

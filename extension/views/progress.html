@@ -79,6 +79,22 @@
 
     .banner { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 8px;
               border: 1px solid var(--ok); color: var(--ok); font-weight: 600; word-break: break-all; }
+
+    /* --- findings: solo cio' che viene trovato, catena dei path gia' calcolati da
+       CodeQL (source -> hop -> ... -> sink), niente CFG/dependency-graph generico --- */
+    .finding { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+               margin: 10px 0; background: var(--card); }
+    .finding .fhead { font-weight: 600; margin-bottom: 8px; font-size: 0.92em; }
+    .finding .fhead .cwe { color: var(--accent); }
+    .chain { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+    .hop { flex: none; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+           font-size: 0.8em; cursor: pointer; background: var(--bg); max-width: 220px; }
+    .hop:hover { border-color: var(--accent); }
+    .hop .hf { font-family: 'Consolas','Courier New',monospace; white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
+    .hop.src { border-color: var(--ok); }
+    .hop.sink { border-color: var(--err); }
+    .chain-arrow { flex: none; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -106,6 +122,11 @@
     <div class="card">
       <div class="lbl">Attività recenti</div>
       <ul class="log" id="log"></ul>
+    </div>
+
+    <div class="card" id="findingsCard" style="display:none;">
+      <div class="lbl">Trovati</div>
+      <div id="findings"></div>
     </div>
 
     <div class="banner" id="banner"></div>
@@ -146,6 +167,51 @@
     function setActivity(text, spinning) {
       $('activity').textContent = text;
       $('spin').classList.toggle('hidden', !spinning);
+    }
+
+    /** Ultimo segmento di un path (per etichettare l'hop senza sommergere di testo). */
+    function basename(p) {
+      const parts = String(p || '').split(/[\\/]/);
+      return parts[parts.length - 1] || String(p || '?');
+    }
+
+    /** Disegna UN finding appena confermato: solo cio' che e' stato trovato (il path
+     *  gia' calcolato da CodeQL), come catena di riquadri — niente CFG/grafo generico. */
+    function renderFinding(e) {
+      $('findingsCard').style.display = 'block';
+      const list = $('findings');
+      const box = document.createElement('div'); box.className = 'finding';
+
+      const head = document.createElement('div'); head.className = 'fhead';
+      const cwe = document.createElement('span'); cwe.className = 'cwe';
+      cwe.textContent = e.cwe || 'unclassified';
+      head.appendChild(cwe);
+      if (e.rule_id) {
+        head.appendChild(document.createTextNode(' · ' + e.rule_id));
+      }
+      box.appendChild(head);
+
+      const chain = document.createElement('div'); chain.className = 'chain';
+      const hops = (e.flow_path && e.flow_path.length) ? e.flow_path : [{ file: e.file, line: e.line }];
+      hops.forEach((hop, i) => {
+        if (i > 0) {
+          const arrow = document.createElement('span');
+          arrow.className = 'chain-arrow'; arrow.textContent = '→';
+          chain.appendChild(arrow);
+        }
+        const hopEl = document.createElement('div');
+        hopEl.className = 'hop' + (i === 0 ? ' src' : '') + (i === hops.length - 1 ? ' sink' : '');
+        hopEl.title = (hop.file || '') + ':' + (hop.line || '') + (hop.note ? '\n' + hop.note : '');
+        const label = document.createElement('div'); label.className = 'hf';
+        label.textContent = basename(hop.file) + ':' + (hop.line != null ? hop.line : '?');
+        hopEl.appendChild(label);
+        hopEl.addEventListener('click', () => {
+          vscodeApi.postMessage({ t: '__open', file: hop.file, line: hop.line });
+        });
+        chain.appendChild(hopEl);
+      });
+      box.appendChild(chain);
+      list.insertBefore(box, list.firstChild);
     }
 
     function pushLog(state, name, sub) {
@@ -189,6 +255,8 @@
         case 'counts':
           $('c-cand').textContent = e.candidates; $('c-find').textContent = e.findings;
           $('c-cwe').textContent = e.cwes; break;
+        case 'finding':
+          renderFinding(e); break;
         case 'done':
           phases.forEach((p) => phaseState[p] = 'done'); renderStepper();
           setActivity('Completato', false);

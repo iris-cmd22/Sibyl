@@ -60,7 +60,7 @@ Transport variables:
 | Env var | Default | Meaning |
 |---|---|---|
 | `MCP_TRANSPORT` | `stdio` | `stdio` \| `sse` \| `streamable-http` |
-| `MCP_HOST` | `0.0.0.0` | bind address (network transports only) |
+| `MCP_HOST` | `127.0.0.1` | bind address (network transports only; the server has no auth — bind `0.0.0.0` only deliberately) |
 | `MCP_PORT` | `8000` | bind port (network transports only) |
 
 ## Debug logging

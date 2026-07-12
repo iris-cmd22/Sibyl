@@ -19,10 +19,10 @@ from pathlib import Path
 import pytest
 
 from server import config
-from server.core import sarif, template
+from server.core import executor, sarif, template
 from server.knowledge import store
 from server.registry import loader
-from server.tools import config_flags, database, knowledge, meta, queries
+from server.tools import config_flags, database, filesystem, knowledge, meta, queries
 from server.transport.mcp_instance import mcp
 
 # Import the package entry point for its assembly side effects: this loads every
@@ -144,9 +144,12 @@ def test_cwe_knowledge_two_layers():
 
 
 def test_list_cwes_routes_tool():
+    # Our own zero-parameter check_* (custom broad / crypto) are now the PRIMARY
+    # recommendation when available (see build_actions.py); run_taint_query /
+    # run_api_misuse_query are the fallback for wrapper functions they don't cover.
     cwes = {c["cwe"]: c for c in json.loads(knowledge.list_cwes())["cwes"]}
-    assert cwes["CWE-328"]["tool"] == "run_api_misuse_query"
-    assert cwes["CWE-89"]["tool"] == "run_taint_query"
+    assert cwes["CWE-328"]["tool"] == "check_weak_hash"
+    assert cwes["CWE-89"]["tool"] == "check_sql_injection"
 
 
 def test_list_cwes_routes_insecure_config_flag():
@@ -209,6 +212,124 @@ def test_generic_insecure_config_rejects_bad_input():
 
 
 # --------------------------------------------------------------------------- #
+# ADVERSARIAL: defenses against a manipulated/compromised model — path
+# traversal, db_path/query_path escaping the intended directories, QL-injection
+# via insecure_value, and the Detection/Validation tool isolation.
+# --------------------------------------------------------------------------- #
+def test_read_file_snippet_rejects_path_traversal(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "safe.py").write_text("x = 1\n", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret\n", encoding="utf-8")
+
+    r = json.loads(filesystem.read_file_snippet(str(repo), "../secret.txt"))
+    assert "error" in r
+
+    # An absolute path escapes containment too (Path.__truediv__ discards the left
+    # side when the right side is already absolute) — must still be rejected.
+    r2 = json.loads(filesystem.read_file_snippet(str(repo), str(secret)))
+    assert "error" in r2
+
+    # A legitimate in-repo file still works.
+    r3 = json.loads(filesystem.read_file_snippet(str(repo), "safe.py"))
+    assert "error" not in r3 and "x = 1" in r3["lines"]
+
+
+def test_run_custom_query_rejects_path_outside_registry(tmp_path: Path):
+    outside = tmp_path / "evil.ql"
+    outside.write_text("import python\nselect 1", encoding="utf-8")
+
+    r = json.loads(queries.run_custom_query("_work/db_does_not_matter", str(outside)))
+    assert "error" in r
+
+    r2 = json.loads(queries.run_custom_query("_work/db_does_not_matter", "../../evil.ql"))
+    assert "error" in r2
+
+
+def test_analyze_with_query_rejects_db_path_outside_work_dir(tmp_path: Path):
+    fake_db = tmp_path / "not_a_real_db"
+    fake_db.mkdir()
+    r = json.loads(executor.analyze_with_query(str(fake_db), Path("dummy.ql")))
+    assert "error" in r and "WORK_DIR" in r["error"]
+
+
+def test_escape_ql_string_neutralizes_quotes_and_backslashes():
+    assert template.escape_ql_string('x" or 1=1 //') == 'x\\" or 1=1 //'
+    assert template.escape_ql_string('a\\b"c') == 'a\\\\b\\"c'
+    assert template.render_ql_string('x"') == '"x\\""'
+
+
+@pytest.mark.codeql
+def test_generic_insecure_config_malicious_value_still_compiles(insecure_config_db):
+    # insecure_value is arbitrary text (not an identifier). A raw `"` must not be
+    # able to break out of the generated query's string literal (QL-injection) —
+    # the query must still be valid CodeQL and simply find nothing (the repo has no
+    # literal matching the malicious string), proving the escaping in fix #2 holds.
+    r = json.loads(config_flags.run_insecure_config_flag_query(
+        insecure_config_db, module="requests", functions=["get"], param_name="verify",
+        insecure_value='x" or 1=1 //', cwe="CWE-295"))
+    assert "error" not in r
+    assert r["finding_count"] == 0
+
+
+def test_list_phase_tools_read_file_snippet_detection_only():
+    data = json.loads(meta.list_phase_tools())
+    assert "read_file_snippet" in data["detection"]
+    assert "read_file_snippet" not in data["validation"]
+
+
+def test_read_file_snippet_refuses_during_validation_phase(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "safe.py").write_text("x = 1\n", encoding="utf-8")
+    try:
+        meta.set_phase(meta.VALIDATION)
+        r = json.loads(filesystem.read_file_snippet(str(repo), "safe.py"))
+        assert "error" in r
+    finally:
+        meta.set_phase(meta.DETECTION)  # don't leak phase state into other tests
+
+
+# --------------------------------------------------------------------------- #
+# run_taint_query: new-parameter validation (fast, no CodeQL needed)
+# --------------------------------------------------------------------------- #
+def test_run_taint_query_requires_sink_names_or_concept():
+    r = json.loads(queries.run_taint_query("dummy", sink_names=[]))
+    assert "error" in r
+
+
+def test_run_taint_query_accepts_sink_concept_without_sink_names():
+    # Fails later (bad db_path), but must get PAST the "sink_names or
+    # sink_concept required" validation instead of erroring on it.
+    r = json.loads(queries.run_taint_query("dummy", sink_names=[], sink_concept="SqlExecution"))
+    assert r.get("error") != "sink_names or sink_concept is required"
+
+
+def test_run_taint_query_rejects_unknown_sink_concept():
+    r = json.loads(queries.run_taint_query("dummy", sink_names=["execute"], sink_concept="Nope"))
+    assert "error" in r and "sink_concept" in r["error"]
+
+
+def test_run_taint_query_local_sources_are_opt_in(monkeypatch):
+    # Bypass the real template render/CodeQL run: capture what run_taint_query
+    # would have sent to render_and_analyze instead.
+    captured: dict = {}
+
+    def fake_render_and_analyze(db_path, template_name, replacements, out_prefix, cwe="", extra=None):
+        captured["extra"] = extra
+        return json.dumps({"ok": True})
+
+    monkeypatch.setattr(queries, "render_and_analyze", fake_render_and_analyze)
+
+    queries.run_taint_query("dummy", sink_names=["execute"])
+    assert "input" not in captured["extra"]["source_names"]
+
+    queries.run_taint_query("dummy", sink_names=["execute"], include_local_sources=True)
+    assert set(queries._LOCAL_SOURCE_NAMES) <= set(captured["extra"]["source_names"])
+
+
+# --------------------------------------------------------------------------- #
 # CODEQL: template compilation (slow)
 # --------------------------------------------------------------------------- #
 @pytest.mark.codeql
@@ -218,9 +339,45 @@ def test_taint_template_compiles():
     rendered = (tmpl.replace("{{SINK_NAMES}}", template.render_names(["execute"]))
                     .replace("{{SOURCE_NAMES}}", template.render_names([]))
                     .replace("{{SANITIZER_NAMES}}", template.render_names([]))
+                    .replace("{{SINK_CONCEPT_CLAUSE}}", "")
                     .replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", ""))
     config.GENERATED_DIR.mkdir(exist_ok=True)
     out = config.GENERATED_DIR / "test_taint_compile.ql"
+    out.write_text(rendered, encoding="utf-8")
+    rc = subprocess.run(
+        [config.CODEQL_BIN, "query", "compile", str(out),
+         f"--search-path={config.CODEQL_SEARCH_PATH}"],
+        capture_output=True, text=True, timeout=config.CODEQL_TIMEOUT,
+    )
+    out.unlink(missing_ok=True)
+    assert rc.returncode == 0, rc.stderr[-1000:]
+
+
+_SINK_CONCEPT_CLAUSES = [
+    ("SqlExecution", "getSql"),
+    ("SystemCommandExecution", "getCommand"),
+    ("FileSystemAccess", "getAPathArgument"),
+    ("Decoding", "getAnInput"),
+]
+
+
+@pytest.mark.codeql
+@pytest.mark.parametrize("ql_type,accessor", _SINK_CONCEPT_CLAUSES)
+def test_taint_template_with_sink_concept_compiles(ql_type: str, accessor: str):
+    """Each entry of queries._SINK_CONCEPTS must render into valid CodeQL.
+    Also exercises the local-source names (input/getenv) folded into
+    SOURCE_NAMES by include_local_sources, since they share the same
+    placeholder as agent-supplied source names."""
+    import subprocess
+    tmpl = (config.TEMPLATE_DIR / "taint_namebased.ql.tmpl").read_text(encoding="utf-8")
+    concept_clause = f"or exists({ql_type} c | node = c.{accessor}())"
+    rendered = (tmpl.replace("{{SINK_NAMES}}", template.render_names([]))
+                    .replace("{{SOURCE_NAMES}}", template.render_names(queries._LOCAL_SOURCE_NAMES))
+                    .replace("{{SANITIZER_NAMES}}", template.render_names([]))
+                    .replace("{{SINK_CONCEPT_CLAUSE}}", concept_clause)
+                    .replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", ""))
+    config.GENERATED_DIR.mkdir(exist_ok=True)
+    out = config.GENERATED_DIR / f"test_taint_concept_{ql_type}_compile.ql"
     out.write_text(rendered, encoding="utf-8")
     rc = subprocess.run(
         [config.CODEQL_BIN, "query", "compile", str(out),
@@ -383,17 +540,21 @@ def test_generic_insecure_config_clean_repo(clean_repo):
 # --------------------------------------------------------------------------- #
 def test_flow_inventory_tool_registered():
     names = _registered_tool_names()
-    assert "find_all_flows" in names               # Detection: flow inventory
-    assert "find_sensitive_operations" in names    # Detection: non-flow inventory
+    assert "find_all_flows" in names          # Detection: flow inventory
+    assert "find_crypto_operations" in names  # Detection: one of the categorized non-flow inventories
 
 
 def test_list_phase_tools_is_source_of_truth():
     # The SERVER owns the tool -> phase mapping (the agent does not hardcode it).
     data = json.loads(meta.list_phase_tools())
     assert set(data) == {"detection", "validation"}
-    # Detection = read + build DB + the two CWE-agnostic inventories.
-    assert {"find_all_flows", "find_sensitive_operations",
-            "create_codeql_database"} <= set(data["detection"])
+    # Detection (LLM) only reads code to enrich the pre-gathered evidence: DB creation
+    # and the 12 inventory tools (find_all_flows + 11 categorized/extra) need zero
+    # judgement to run, so the agent's orchestrator calls them directly and they are
+    # NOT exposed to the model (see agent/orchestrator.py:_gather_evidence).
+    assert set(data["detection"]) == {"list_python_files", "read_file_snippet"}
+    assert "find_all_flows" not in data["detection"]
+    assert "create_codeql_database" not in data["detection"]
     # Validation = targeted queries + knowledge, and the check_* shortcuts are
     # auto-included (previously they were wrongly excluded).
     assert "run_taint_query" in data["validation"]
@@ -439,15 +600,25 @@ def test_flow_inventory_template_compiles():
 
 
 @pytest.mark.codeql
-def test_sensitive_ops_template_compiles():
+@pytest.mark.parametrize("tmpl_name,replacements", [
+    ("command_exec.ql.tmpl", {}),
+    ("code_exec.ql.tmpl", {}),
+    ("sql_exec.ql.tmpl", {}),
+    ("filesystem_access.ql.tmpl", {}),
+    ("decoding_ops.ql.tmpl", {}),
+    ("crypto_ops.ql.tmpl", {}),
+    ("weak_randomness.ql.tmpl", {"{{WEAK_CALL_NAMES}}": template.render_names(["md5", "random"])}),
+    ("insecure_config_flags.ql.tmpl", {"{{FLAG_PARAM_NAMES}}": template.render_names(["verify", "shell"])}),
+])
+def test_categorized_sensitive_op_templates_compile(tmpl_name, replacements):
     import subprocess
-    tmpl = (config.TEMPLATE_DIR / "sensitive_ops.ql.tmpl").read_text(encoding="utf-8")
-    rendered = (tmpl.replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", "")
-                    .replace("{{WEAK_CALL_NAMES}}", template.render_names(["md5", "random"]))
-                    .replace("{{FLAG_PARAM_NAMES}}", template.render_names(["verify", "shell"])))
+    tmpl = (config.TEMPLATE_DIR / tmpl_name).read_text(encoding="utf-8")
+    rendered = tmpl.replace("{{CWE_ID_SUFFIX}}", "").replace("{{CWE_TAG_LINE}}", "")
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
     assert "external/cwe" not in rendered  # CWE-agnostic inventory
     config.GENERATED_DIR.mkdir(exist_ok=True)
-    out = config.GENERATED_DIR / "test_sensitive_ops_compile.ql"
+    out = config.GENERATED_DIR / f"test_{tmpl_name.replace('.ql.tmpl', '')}_compile.ql"
     out.write_text(rendered, encoding="utf-8")
     rc = subprocess.run(
         [config.CODEQL_BIN, "query", "compile", str(out),
@@ -459,14 +630,14 @@ def test_sensitive_ops_template_compiles():
 
 
 @pytest.mark.codeql
-def test_find_sensitive_operations_finds_crypto_without_flow(vuln_db):
+def test_find_crypto_operations_finds_crypto_without_flow(vuln_db):
     # crypto_util.py uses hashlib.md5 / hashlib.new('sha1') with NO data-flow:
-    # find_all_flows would miss them; find_sensitive_operations must surface them.
-    r = json.loads(queries.find_sensitive_operations(vuln_db))
+    # find_all_flows would miss them; find_crypto_operations must surface them.
+    r = json.loads(queries.find_crypto_operations(vuln_db))
     assert r["op_count"] >= 1
     crypto_ops = [o for o in r["operations"] if "crypto_util.py" in (o.get("file") or "")]
-    assert crypto_ops, "expected a sensitive op in crypto_util.py"
+    assert crypto_ops, "expected a crypto op in crypto_util.py"
     # Detected via the SEMANTIC crypto Concept (kind 'crypto'), not name matching.
-    assert any(o["kind"] == "crypto" for o in crypto_ops)
+    assert all(o["kind"] == "crypto" for o in crypto_ops)
     # CWE-agnostic: kinds are structural, never a CWE id.
     assert all("CWE" not in (o.get("kind") or "") for o in r["operations"])

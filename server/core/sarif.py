@@ -36,6 +36,8 @@ def loc_brief(physical: dict) -> dict:
 # Output:   lista ordinata di passi [{file, line, note?}, ...]; vuota se non c'è flusso.
 # Come realizzato: scorre codeFlows -> threadFlows -> locations, e per ogni passo
 #            crea un {file,line} (+ eventuale nota); usa il primo threadFlow trovato.
+
+# TODO: se non c'è flusso non deve tornare nulla, invece mi trovo dei flussi vuoti che confondono l'agente
 def extract_flow(result: dict) -> list[dict]:
     steps = []
     for cf in result.get("codeFlows", []):
@@ -46,6 +48,13 @@ def extract_flow(result: dict) -> list[dict]:
                 msg = loc.get("location", {}).get("message", {}).get("text", "")
                 if msg:
                     entry["note"] = msg
+                # CodeQL often visits the same file:line more than once in a row
+                # (different taint states at the same node); collapsing consecutive
+                # duplicates halves the noise sent to the LLM every turn without
+                # losing any hop (downstream consumers only use file/line/code).
+                if steps and steps[-1].get("file") == entry.get("file") \
+                        and steps[-1].get("line") == entry.get("line"):
+                    continue
                 steps.append(entry)
             if steps:
                 return steps

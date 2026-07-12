@@ -72,6 +72,14 @@ CUSTOM_QUERIES = {
     "xss": ("CWE-79", "Cross-site scripting", "ParamToXss.ql"),
 }
 
+# Root of the OFFICIAL CodeQL standard query library (GitHub Security Lab), inside the
+# same checkout already required for CODEQL_SEARCH_PATH. Used by the non-CWE signal
+# tools (find_exception_handling_issues, find_broken_sanitizer_patterns,
+# find_resource_handling_issues in server/tools/queries.py) to locate their official
+# .ql files (Exceptions/, Statements/, Resources/, Expressions/Regex/) — referenced
+# directly, never copied.
+STANDARD_QUERY_DIR = Path(CODEQL_SEARCH_PATH) / "python" / "ql" / "src"
+
 # --- Bundled data (travels with the package; defaults point inside server/) ---
 # .ql.tmpl templates with {{SINK_NAMES}} / {{SOURCE_NAMES}} / ... placeholders.
 TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", SERVER_DIR / "query_templates"))

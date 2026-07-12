@@ -46,8 +46,8 @@
       "Run your code using the lowest privileges that are required to accomplish the necessary tasks [REF-76]. If possible, create isolated accounts with limited privileges that are only used for a single task. That way, a successful attack will not immediately give the attacker access to the rest of the software or its environment. For example, database applications rarely need to run as the database administrator, especially in day-to-day operations. \n                   Specifically, follow the principle of least privilege when creating user accounts to a SQL database. The database users should only have the minimum privileges necessary to use their account. If the requirements of the system indicate that a user can read and modify their own data, then limit their privileges so they cannot read/write others' data. Use the strictest permissions possible on all database objects, such as execute-only for stored procedures."
     ],
     "actions": {
-      "tool": "run_taint_query",
-      "how_to_verify": "Call run_taint_query(cwe='CWE-89', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "tool": "check_sql_injection",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_sql_injection(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-89', sink_names=<candidates below + any real wrapper names you saw in the code>).",
       "candidate_sink_names": [
         "execute",
         "executemany",
@@ -138,8 +138,8 @@
       "For any data that will be used to generate a command to be executed, keep as much of that data out of external control as possible. For example, in web applications, this may require storing the data locally in the session's state instead of sending it out to the client in a hidden form field."
     ],
     "actions": {
-      "tool": "run_taint_query",
-      "how_to_verify": "Call run_taint_query(cwe='CWE-78', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "tool": "check_os_command_injection",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_os_command_injection(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-78', sink_names=<candidates below + any real wrapper names you saw in the code>).",
       "candidate_sink_names": [
         "system",
         "popen",
@@ -225,8 +225,8 @@
       "Inputs should be decoded and canonicalized to the application's current internal representation before being validated (CWE-180). Make sure that the application does not decode the same input twice (CWE-174). Such errors could be used to bypass allowlist validation schemes by introducing dangerous inputs after they have been checked. \n                   Use a built-in path canonicalization function (such as realpath() in C) that produces the canonical version of the pathname, which effectively removes \"..\" sequences and symbolic links (CWE-23, CWE-59). This includes: \n                      \n                         realpath() in C \n                         getCanonicalPath() in Java \n                         GetFullPath() in ASP.NET \n                         realpath() or abs_path() in Perl \n                         realpath() in PHP"
     ],
     "actions": {
-      "tool": "run_taint_query",
-      "how_to_verify": "Call run_taint_query(cwe='CWE-22', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "tool": "check_path_traversal",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_path_traversal(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-22', sink_names=<candidates below + any real wrapper names you saw in the code>).",
       "candidate_sink_names": [
         "open",
         "read",
@@ -308,8 +308,8 @@
       "Understand all the potential areas where untrusted inputs can enter your software: parameters or arguments, cookies, anything read from the network, environment variables, reverse DNS lookups, query results, request headers, URL components, e-mail, files, filenames, databases, and any external systems that provide data to the application. Remember that such inputs may be obtained indirectly through API calls."
     ],
     "actions": {
-      "tool": "run_taint_query",
-      "how_to_verify": "Call run_taint_query(cwe='CWE-79', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "tool": "check_xss",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_xss(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-79', sink_names=<candidates below + any real wrapper names you saw in the code>).",
       "candidate_sink_names": [
         "render_template_string",
         "Markup",
@@ -377,8 +377,8 @@
       "Explicitly define a final object() to prevent deserialization."
     ],
     "actions": {
-      "tool": "run_taint_query",
-      "how_to_verify": "Call run_taint_query(cwe='CWE-502', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "tool": "check_deserialization",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_deserialization(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-502', sink_names=<candidates below + any real wrapper names you saw in the code>).",
       "candidate_sink_names": [
         "loads",
         "load",
@@ -881,8 +881,8 @@
       "Use an adaptive hash function that can be configured to change the amount of computational effort needed to compute the hash, such as the number of iterations (\"stretching\") or the amount of memory required. Some hash functions perform salting automatically. These functions can significantly increase the overhead for a brute force attack compared to intentionally-fast functions such as MD5. For example, rainbow table attacks can become infeasible due to the high computing overhead. Finally, since computing power gets faster and cheaper over time, the technique can be reconfigured to increase the workload without forcing an entire replacement of the algorithm in use. \n                   Some hash functions that have one or more of these desired properties include bcrypt [REF-291], scrypt [REF-292], and PBKDF2 [REF-293]. While there is active debate about which of these is the most effective, they are all stronger than using salts with hash functions with very little computing overhead. \n                   Note that using these functions can have an impact on performance, so they require special consideration to avoid denial-of-service attacks. However, their configurability provides finer control over how much CPU and memory is used, so it could be adjusted to suit the environment's needs."
     ],
     "actions": {
-      "tool": "run_api_misuse_query",
-      "how_to_verify": "Call run_api_misuse_query(cwe='CWE-328', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>). Provide at least one list.",
+      "tool": "check_weak_hash",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_hash(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-328', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
       "candidate_weak_call_names": [
         "md5",
         "sha1",
@@ -944,8 +944,8 @@
       "Carefully manage and protect cryptographic keys (see CWE-320). If the keys can be guessed or stolen, then the strength of the cryptography itself is irrelevant."
     ],
     "actions": {
-      "tool": "run_api_misuse_query",
-      "how_to_verify": "Call run_api_misuse_query(cwe='CWE-327', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>). Provide at least one list.",
+      "tool": "check_broken_crypto",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_broken_crypto(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-327', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
       "candidate_weak_call_names": [
         "DES",
         "DES3",
@@ -1008,8 +1008,8 @@
       "Use automated static analysis tools that target this type of weakness. Many modern techniques use data flow analysis to minimize the number of false positives. This is not a perfect solution, since 100% accuracy and coverage are not feasible."
     ],
     "actions": {
-      "tool": "run_api_misuse_query",
-      "how_to_verify": "Call run_api_misuse_query(cwe='CWE-330', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>). Provide at least one list.",
+      "tool": "check_weak_random",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_random(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-330', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
       "candidate_weak_call_names": [
         "random",
         "randint",
@@ -1064,8 +1064,8 @@
       "When using industry-approved techniques, use them correctly. Don't cut corners by skipping resource-intensive steps (CWE-325). These steps are often essential for preventing common attacks."
     ],
     "actions": {
-      "tool": "run_api_misuse_query",
-      "how_to_verify": "Call run_api_misuse_query(cwe='CWE-916', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>). Provide at least one list.",
+      "tool": "check_weak_password_hash",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_password_hash(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-916', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
       "candidate_weak_call_names": [
         "md5",
         "sha1",
@@ -1098,13 +1098,13 @@
     ],
     "actions": {
       "tool": "check_insecure_verify_false",
-      "how_to_verify": "Call check_insecure_verify_false(db_path) to detect requests.get(..., verify=False) patterns.",
+      "how_to_verify": "Call check_insecure_verify_false(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-295').",
       "candidate_patterns": [
         "requests.get(..., verify=False)",
         "requests.post(..., verify=False)",
         "ssl_context.check_hostname = False"
       ],
-      "interpretation": "Point detection: flag flags calls with verify=False. No data flow analysis needed."
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
     }
   },
   "CWE-489": {
@@ -1117,13 +1117,13 @@
     ],
     "actions": {
       "tool": "check_insecure_debug_true",
-      "how_to_verify": "Call check_insecure_debug_true(db_path) to detect Flask(debug=True) or Django debug=True patterns.",
+      "how_to_verify": "Call check_insecure_debug_true(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-489').",
       "candidate_patterns": [
         "Flask(..., debug=True)",
         "app.run(debug=True)",
         "DEBUG = True"
       ],
-      "interpretation": "Point detection: flag debug mode initialization. Severity depends on environment (development vs. production)."
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
     }
   },
   "CWE-614": {
@@ -1136,13 +1136,13 @@
     ],
     "actions": {
       "tool": "check_insecure_cookie_flags",
-      "how_to_verify": "Call check_insecure_cookie_flags(db_path) to detect cookie configuration without secure/httponly/samesite settings.",
+      "how_to_verify": "Call check_insecure_cookie_flags(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-614').",
       "candidate_patterns": [
         "response.set_cookie(..., secure=False)",
         "response.set_cookie(..., httponly=False)",
         "response.set_cookie(..., samesite='None')"
       ],
-      "interpretation": "Point detection: flag cookie configuration. Severity depends on cookie purpose (session vs. tracking) and flag combination."
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
     }
   }
 }

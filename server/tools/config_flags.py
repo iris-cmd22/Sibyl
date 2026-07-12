@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 
 from server.core.executor import render_and_analyze
-from server.core.template import normalize_cwe, is_valid_name
+from server.core.template import normalize_cwe, is_valid_name, escape_ql_string
 from server.knowledge.store import CWE_REFERENCE
 from server.transport.mcp_instance import mcp
 
@@ -52,6 +52,9 @@ def run_insecure_config_flag_query(
         return json.dumps({"error": "param_name must be an identifier"})
     if not is_valid_name(module):
         return json.dumps({"error": "module must be an identifier"})
+    if not isinstance(insecure_value, str) or not insecure_value:
+        return json.dumps({"error": "insecure_value must be a non-empty string, "
+                                     "e.g. \"false\", \"true\", or \"ecb\""})
 
     cwe_id = normalize_cwe(cwe)[0]
 
@@ -69,16 +72,21 @@ def run_insecure_config_flag_query(
             f'.booleanValue() = {insecure_value.lower()}'
         )
     else:
-        # String comparison
+        # String comparison. insecure_value is arbitrary text (not an identifier), so
+        # it must be QL-escaped before being interpolated into the generated query
+        # (anti QL-injection: a raw `"` here would otherwise break out of the string
+        # literal and inject arbitrary QL into the generated .ql file).
+        safe_value = escape_ql_string(insecure_value.lower())
         param_condition = (
             f'exists(StringLiteral s | s = call.getKeywordParameter("{param_name}")'
             f'.getAValueReachingSink().asExpr() and '
-            f's.getText().toLowerCase() in ["\'{insecure_value.lower()}\'", '
-            f'"\\\"{insecure_value.lower()}\\\""])'
+            f"s.getText().toLowerCase() in [\"'{safe_value}'\", "
+            f'"\\"{safe_value}\\""])'
         )
 
     message = (
-        f"Insecure configuration: {module}.{functions[0]}(..., {param_name}={insecure_value}). "
+        f"Insecure configuration: {module}.{functions[0]}(..., {param_name}="
+        f"{escape_ql_string(insecure_value)}). "
         f"This is vulnerable to {cwe_id or 'security issues'}."
     )
 

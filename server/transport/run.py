@@ -8,7 +8,11 @@ Controlled entirely by environment variables, so the same code runs in both
 scenarios without changes:
 
     MCP_TRANSPORT  stdio (default) | sse | streamable-http
-    MCP_HOST       bind address for network transports (default 0.0.0.0)
+    MCP_HOST       bind address for network transports (default 127.0.0.1 —
+                   this server has no authentication, so any tool, including
+                   filesystem/database ones, is reachable by anyone who can
+                   connect; only bind it to 0.0.0.0 deliberately, e.g. behind a
+                   trusted network boundary)
     MCP_PORT       bind port for network transports     (default 8000)
 """
 from __future__ import annotations
@@ -36,8 +40,10 @@ def run() -> None:
         )
 
     if transport != "stdio":
-        # Network transports: honour host/port overrides.
-        mcp.settings.host = os.environ.get("MCP_HOST", "0.0.0.0")
+        # Network transports: honour host/port overrides. Default to loopback-only:
+        # this server has no authentication, so binding 0.0.0.0 by default would
+        # expose every tool (filesystem, database, query execution) to the network.
+        mcp.settings.host = os.environ.get("MCP_HOST", "127.0.0.1")
         mcp.settings.port = int(os.environ.get("MCP_PORT", "8000"))
         logger.info("transport: %s on %s:%s", transport, mcp.settings.host, mcp.settings.port)
     else:

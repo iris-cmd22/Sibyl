@@ -56,3 +56,24 @@ def normalize_cwe(cwe) -> tuple[str | None, str, str]:
 # Come realizzato: verifica che sia una stringa e che corrisponda alla regex _NAME_RE.
 def is_valid_name(s: str) -> bool:
     return isinstance(s, str) and bool(_NAME_RE.match(s))
+
+
+# Obiettivo: sfuggire una stringa ARBITRARIA (non un identificatore, es. un valore di
+#            configurazione come "false"/un URL) perche' possa essere interpolata
+#            dentro un literal QL (delimitato da apici doppi) senza romperne la
+#            sintassi (anti QL-injection, analogo a render_names per gli identificatori).
+# Input:    value = la stringa da sfuggire.
+# Output:   il contenuto gia' sfuggito, SENZA gli apici doppi esterni.
+# Come realizzato: escape manuale di backslash e doppio apice, in quest'ordine (il
+#            backslash va sfuggito per primo, altrimenti raddoppierebbe quelli appena
+#            inseriti per gli apici).
+def escape_ql_string(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+# Obiettivo: come escape_ql_string, ma restituisce il literal QL completo, pronto da
+#            incollare cosi' com'e' dove serve un'intera stringa tra apici.
+# Input:    value = la stringa da incapsulare.
+# Output:   stringa QL letterale gia' tra doppi apici, con backslash e apice sfuggiti.
+def render_ql_string(value: str) -> str:
+    return f'"{escape_ql_string(value)}"'

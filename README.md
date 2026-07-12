@@ -5,7 +5,9 @@ Sibyl analizza la sicurezza di una repository facendo guidare l'analisi a un
 
 È composto da **due programmi indipendenti** che girano in parallelo:
 
-- **Server MCP** (`python -m server`) — incapsula la CLI CodeQL ed espone 26 tool.
+- **Server MCP** (`python -m server`) — incapsula la CLI CodeQL ed espone 41 tool
+  (vedi §Tool MCP esposti). Su Windows/PowerShell ricorda di impostare
+  `$env:MCP_TRANSPORT = "sse"` prima di avviarlo per l'uso in rete/SSE (§Uso).
 - **Agente** (`python -m agent`) — client che connette l'LLM al server e orchestra
   l'analisi fino al report.
 
@@ -37,29 +39,85 @@ Tre processi che dialogano su `localhost` (nessuna porta esposta all'esterno):
 | Cartella | Cosa contiene |
 |---|---|
 | `server/` | Server MCP autocontenuto: `core/`, `tools/`, `registry/`, `knowledge/`, `transport/`, `config.py` |
-| `agent/` | Agente modulare: `orchestrator.py`, `clients/`, `robustness/`, `report.py`, `config.py` |
+| `agent/` | Agente modulare: `orchestrator.py`, `prompts.py`/`prompts_local.py`/`prompt_router.py`, `worklist.py`, `progress.py`, `clients/`, `robustness/` (incl. `degenerate.py`, `readargs.py`), `report.py`, `config.py` |
 | `query_templates/`, `generated_queries/` | template `.ql.tmpl` e query generate (dentro `server/`) |
+
+## Pipeline di analisi
+
+L'agente esegue l'analisi in tre stadi (`agent/orchestrator.py`):
+
+1. **Gathering** (deterministico, nessuna chiamata LLM) — `_gather_evidence` costruisce
+   il database CodeQL (`create_codeql_database`) e chiama in sequenza `find_all_flows` +
+   gli 11 tool categorizzati (vedi §Tool MCP esposti), popolando una work-list di
+   flow/operazioni candidate. Nessun giudizio richiesto, quindi nessun modello coinvolto.
+2. **Detection** (LLM) — legge il codice reale (`read_file_snippet`, `list_python_files`)
+   e **arricchisce** l'evidenza già raccolta (nomi/valori/algoritmi reali, giudizio di
+   rilevanza). Non scopre segnali da sola e non assegna CWE.
+3. **Validation** (LLM) — esegue le query mirate (check zero-parametro in primis,
+   `run_taint_query`/`run_api_misuse_query`/`run_insecure_config_flag_query` come
+   fallback), associa un CWE reale a ogni finding e scrive il report finale.
+
+Controlli anti-allucinazione integrati: Validation non può chiudere il report finché non
+ha verificato con un tool reale un numero di elementi coerente con l'evidenza raccolta, e
+ogni CWE citato nel report deve essere confermato da un tool effettivamente chiamato in
+quello stadio.
 
 ## Tool MCP esposti
 
 **Esplorazione / DB**
 - `list_python_files` — enumera i `.py` della repo
-- `read_file_snippet` — legge righe sorgente attorno a un finding
-- `create_codeql_database` — costruisce il DB CodeQL
+- `read_file_snippet(repo_path, file, start_line, end_line)` — legge righe sorgente
+  attorno a un finding (il path va passato come `repo_path` + `file` relativo, non più
+  un path assoluto)
+- `create_codeql_database` — costruisce il DB CodeQL (chiamato deterministicamente dal
+  Gathering, non più un tool dell'LLM in Detection)
 - `analyze_database` — esegue la suite standard `python-security-extended`
-- `run_custom_query` — esegue un `.ql` arbitrario
+- `find_confirmed_vulnerabilities(db_path, max_findings=200)` — esegue l'intera suite
+  ufficiale e restituisce risultati deduplicati già taggati con CWE certificato.
+  Registrato ma **non cablato** in nessuna fase della pipeline automatica oggi
+  (né Gathering né Detection/Validation): disponibile per uso manuale o come base per
+  un futuro step di "Evaluation" esterno alla pipeline.
+- `run_custom_query(db_path, query_path)` — esegue per NOME un `.ql` gia' registrato
+  dentro `CUSTOM_QUERY_DIR` (mai un path libero: solo cosi' si estendono le query
+  custom, aggiungendo un nuovo file in quella cartella)
 
 **Knowledge base**
 - `list_cwes` — elenca i CWE rilevabili (con detection kind e tool giusto)
 - `cwe_knowledge(cwe)` — scheda completa di un CWE (descrizione MITRE + azioni operative)
 
-**Verifica vulnerabilità** — tre famiglie name-based / template-based:
+**Inventario CWE-agnostico** (fase Gathering, deterministica) — sostituiscono l'unico
+tool monolitico `find_sensitive_operations` (rimosso): un tool per categoria, ciascuno
+`(db_path, repo_path="", max_ops=200)`, nessuno assegna un CWE.
 
-| Detection | Tool | CWE tipici |
-|-----------|------|------------|
-| **taint** (dataflow source→sink) | `run_taint_query` | 89, 78, 22, 79, 502, 90, 94, 611, 643, 601, 918, 117 |
-| **api_misuse** (point detection) | `run_api_misuse_query` | 327, 328, 330, 916 |
-| **insecure_config_flag** (point detection) | `check_insecure_*` + `run_insecure_config_flag_query` | 295, 78, 79, 489, 327, 330, 614 |
+| Tool | Kind | Template |
+|---|---|---|
+| `find_command_execution` | command-exec | `command_exec.ql.tmpl` |
+| `find_code_execution` | code-exec | `code_exec.ql.tmpl` |
+| `find_sql_execution` | sql-exec | `sql_exec.ql.tmpl` |
+| `find_filesystem_access` | filesystem | `filesystem_access.ql.tmpl` |
+| `find_decoding_operations` | decoding | `decoding_ops.ql.tmpl` |
+| `find_crypto_operations` | crypto | `crypto_ops.ql.tmpl` |
+| `find_weak_randomness` | weak-randomness | `weak_randomness.ql.tmpl` |
+| `find_insecure_config_flags` | config-flag | `insecure_config_flags.ql.tmpl` |
+
+Più 3 tool "non-CWE" basati su query CodeQL ufficiali standard (segnali strutturali da
+interpretare, non vulnerabilità già classificate):
+
+| Tool | Segnale | Query ufficiali usate |
+|---|---|---|
+| `find_exception_handling_issues` | except troppo ampio/vuoto | `Exceptions/EmptyExcept.ql`, `Exceptions/CatchingBaseException.ql`, `Statements/UnusedExceptionObject.ql` |
+| `find_broken_sanitizer_patterns` | regex-sanitizer rotta | query in `Expressions/Regex/` |
+| `find_resource_handling_issues` | risorse non chiuse / manca `with` | `Resources/FileNotAlwaysClosed.ql`, `Statements/ShouldUseWithStatement.ql` |
+
+**Verifica vulnerabilità** — la wiki CWE (`cwe_knowledge`) raccomanda sempre prima il
+check dedicato a zero parametri; i tool generici `run_taint_query`/`run_api_misuse_query`
+restano disponibili come fallback per wrapper/API custom non coperte dai check dedicati:
+
+| Detection | Tool primario | Fallback | CWE tipici |
+|-----------|------|------|------------|
+| **taint** (dataflow source→sink) | `check_sql_injection`, `check_os_command_injection`, `check_path_traversal`, `check_deserialization`, `check_xss` | `run_taint_query` | 89, 78, 22, 79, 502, 90, 94, 611, 643, 601, 918, 117 |
+| **api_misuse** (point detection) | `check_weak_hash`, `check_broken_crypto`, `check_weak_random`, `check_weak_password_hash` | `run_api_misuse_query` | 327, 328, 330, 916 |
+| **insecure_config_flag** (point detection) | `check_insecure_*` | `run_insecure_config_flag_query` | 295, 78, 79, 489, 327, 330, 614 |
 
 ### Insecure configuration flags
 
@@ -149,7 +207,7 @@ repository da analizzare deve stare **sulla stessa macchina del server**.
 ```bash
 # Terminale A — avvia il server MCP (resta in esecuzione)
 source .venv/bin/activate
-MCP_TRANSPORT=sse python -m server          # atteso: "tools registered: 26" su :8000
+MCP_TRANSPORT=sse python -m server          # atteso: "tools registered: 41" su :8000
 
 # Terminale B — lancia l'agente
 source .venv/bin/activate
@@ -264,7 +322,7 @@ I test puri dell'agente girano anche senza Ollama:
 | `CUSTOM_QUERY_DIR` | ✅ | — | cartella con le query custom `*Broad.ql` |
 | `CODEQL_BIN` | | `codeql` | binario CodeQL (percorso completo se non su PATH) |
 | `MCP_TRANSPORT` | | `stdio` | trasporto: `stdio` / `sse` / `streamable-http` |
-| `MCP_HOST` / `MCP_PORT` | | `0.0.0.0` / `8000` | indirizzo e porta (solo trasporti di rete) |
+| `MCP_HOST` / `MCP_PORT` | | `127.0.0.1` / `8000` | indirizzo e porta (solo trasporti di rete; il server non ha autenticazione, impostare `0.0.0.0` solo deliberatamente) |
 | `CODEQL_TIMEOUT` | | `1800` | timeout (s) per comando CodeQL |
 | `SIBYL_LOG_LEVEL` | | `INFO` | verbosità log del server |
 
@@ -275,10 +333,22 @@ I test puri dell'agente girano anche senza Ollama:
 | `AGENT_LLM_PROVIDER` | `ollama` | backend: `ollama` (locale), `gemini` o `openai` (OpenAI-compat) |
 | `AGENT_MODEL` | `qwen2.5-coder:14b` | modello Ollama da usare |
 | `OLLAMA_HOST` | `http://localhost:11434` | indirizzo di Ollama |
+| `OLLAMA_SHOW_THINKING` | `false` | se `true`, stampa su stderr il "thinking" del modello mentre arriva |
+| `OLLAMA_SHOW_THINKING_WITH_TOOLS` | `false` | come sopra, ma anche nei turni in cui sono esposti tool |
+| `OLLAMA_REPEAT_PENALTY` | `1.1` | penalità di ripetizione (anti-loop per modelli piccoli/quantizzati; un valore troppo alto causa testo "degenerato", vedi `agent/robustness/degenerate.py`) |
+| `OLLAMA_REPEAT_LAST_N` | `128` | quante posizioni indietro considerare per la penalità |
+| `OLLAMA_NUM_PREDICT` | `1536` | tetto massimo di token generati in un turno (`-1` = nessun limite) |
+| `OLLAMA_NUM_PREDICT_TOOLS` | `512` | tetto più corto usato nei turni in cui sono esposti tool |
+| `OLLAMA_TEMPERATURE` | `0.2` | temperatura di campionamento |
+| `OLLAMA_TOP_P` | `0.85` | nucleus sampling |
+| `OLLAMA_TOP_K` | `40` | top-k sampling |
 | `GEMINI_API_KEY` | — | API key di Google AI Studio (solo per `gemini`) |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | modello Gemini (es. `gemini-2.0-flash`) |
+| `GEMINI_BASE_URL` | endpoint OpenAI-compat di Google | endpoint alternativo (proxy/gateway compatibile) |
+| `GEMINI_MIN_INTERVAL` | `0` | intervallo minimo (s) tra richieste, per il throttle lato client |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — / OpenAI | chiave + endpoint per provider `openai` (Groq/Cerebras/...) |
 | `OPENAI_MODEL` | `gpt-4o-mini` | modello per il provider `openai` |
+| `OPENAI_MIN_INTERVAL` | `0` | intervallo minimo (s) tra richieste, per il throttle lato client |
 | `MCP_SERVER_URL` | `http://127.0.0.1:8000/sse` | URL SSE del server MCP |
 | `AGENT_WORK_DIR` | `agent/_work` | dove salvare i checkpoint |
 | `AGENT_REPORTS_DIR` | `agent/reports` | dove salvare i report |

@@ -15,6 +15,12 @@
     "Linters",
     "Other"
   ],
+  "activationEvents": [
+    "onCommand:sibyl.analyzeRepository",
+    "onCommand:sibyl.startServer",
+    "onCommand:sibyl.stopServer",
+    "onCommand:sibyl.configure"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

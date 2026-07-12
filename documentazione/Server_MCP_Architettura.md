@@ -14,7 +14,7 @@
 5. [Architettura a componenti](#5-architettura-a-componenti)
 6. [Mappa delle cartelle e dei file](#6-mappa-delle-cartelle-e-dei-file)
 7. [I componenti, uno per uno](#7-i-componenti-uno-per-uno)
-8. [Il catalogo dei tool (26)](#8-il-catalogo-dei-tool)
+8. [Il catalogo dei tool (41)](#8-il-catalogo-dei-tool)
 9. [Come si avvia e come "parla" (trasporto)](#9-come-si-avvia-e-come-parla-trasporto)
 10. [Configurazione (le variabili d'ambiente)](#10-configurazione)
 11. [Il logging di debug](#11-il-logging-di-debug)
@@ -199,7 +199,7 @@ flowchart TD
     KN --> KN1["store.py — knowledge base + seam lookup_cwe()"]
     KN --> KN2["data/ — cwe_wiki.json, cwe_catalog.json"]
 
-    SRV --> QT["query_templates/<br/>(12 modelli .ql.tmpl)<br/>incl. flow_inventory, sensitive_ops"]
+    SRV --> QT["query_templates/<br/>(19 modelli .ql.tmpl)<br/>incl. flow_inventory + 8 template categorizzati<br/>(command_exec, code_exec, sql_exec, filesystem_access,<br/>decoding_ops, crypto_ops, weak_randomness, insecure_config_flags)"]
     SRV --> GQ["generated_queries/<br/>(qlpack.yml, query generate)"]
 
     SRV --> TR["transport/"]
@@ -246,7 +246,7 @@ lavoro vero. Quattro moduli:
 - **`store.py`** → carica questi due file in memoria all'avvio ed espone la
   **cucitura** `lookup_cwe()` / `lookup_catalog()` / `all_cwes()`: è **l'unico punto
   d'accesso** alla conoscenza usato dai tool (`cwe_knowledge`, `run_taint_query`,
-  `find_sensitive_operations`, …). Oggi legge la wiki JSON; domani un backend a
+  `find_weak_randomness`, …). Oggi legge la wiki JSON; domani un backend a
   **knowledge graph** può sostituirla dietro la stessa firma, senza toccare i tool.
 
 > Un **CWE** (Common Weakness Enumeration) è un codice standard internazionale
@@ -266,33 +266,45 @@ Qui vivono i tool "statici" (sempre presenti), raggruppati per tema:
 flowchart LR
     subgraph tools
         FS["filesystem.py<br/>list_python_files<br/>read_file_snippet"]
-        DB["database.py<br/>create_codeql_database<br/>analyze_database"]
-        QR["queries.py<br/>run_custom_query<br/>run_taint_query<br/>run_api_misuse_query<br/>find_all_flows<br/>find_sensitive_operations"]
+        DB["database.py<br/>create_codeql_database<br/>analyze_database<br/>find_confirmed_vulnerabilities"]
+        QR["queries.py<br/>run_custom_query · run_taint_query<br/>run_api_misuse_query · find_all_flows<br/>+ 11 tool categorizzati (find_command_execution...)"]
         CF["config_flags.py<br/>run_insecure_config_flag_query"]
         KW["knowledge.py<br/>list_cwes<br/>cwe_knowledge"]
-        MT["meta.py<br/>list_phase_tools"]
+        MT["meta.py<br/>list_phase_tools · set_phase"]
     end
 ```
 
 > **Mappa tool→fase sul server.** `meta.py` espone `list_phase_tools`: è **il server**
-> a dichiarare quali tool vanno in Detection e quali in Validation. L'agente la chiede e
-> filtra, senza hardcodare alcun nome di tool.
+> a dichiarare quali tool vanno in Detection e quali in Validation (l'agente la chiede e
+> filtra, senza hardcodare alcun nome di tool) — ma è **solo consultiva**. L'agente ha
+> una **terza fase**, il **Gathering**, che non è LLM: chiama direttamente
+> `create_codeql_database` + `find_all_flows` + gli 11 tool categorizzati, senza
+> passare da nessuna delle due liste (non sono tool "di una fase LLM"). L'enforcement
+> vero è un controllo indipendente: `set_phase`/`get_current_phase` (righe finali di
+> questo modulo) fanno sì che `read_file_snippet` **rifiuti di girare** una volta che
+> `set_phase("validation")` è stato chiamato, a prescindere da cosa dichiari
+> `list_phase_tools()`.
 
 Tre "modi" di rilevamento:
-- **Inventari CWE-agnostici** (usati dall'agente in **Detection**): `find_all_flows`
-  elenca **tutti** i flussi (input non fidato → argomento di chiamata);
-  `find_sensitive_operations` elenca le **operazioni pericolose senza flusso** (crypto/
-  hash/random deboli, exec, config-flag). Non "timbrano" alcun CWE: danno solo il
-  segnale grezzo su cui il modello ragionerà.
+- **Inventari CWE-agnostici** (usati dall'agente in **Gathering**, deterministico):
+  `find_all_flows` elenca **tutti** i flussi (input non fidato → argomento di
+  chiamata); **11 tool categorizzati** (`find_command_execution`,
+  `find_code_execution`, `find_sql_execution`, `find_filesystem_access`,
+  `find_decoding_operations`, `find_crypto_operations`, `find_weak_randomness`,
+  `find_insecure_config_flags`, più 3 tool "non-CWE" da query ufficiali) elencano le
+  **operazioni pericolose senza flusso**, uno per categoria (sostituiscono il vecchio
+  tool monolitico `find_sensitive_operations`, rimosso). Non "timbrano" alcun CWE:
+  danno solo il segnale grezzo su cui il modello ragionerà in Detection.
 - **Taint analysis parametrico** (verifica, in **Validation**): `run_taint_query` segue
   il dato dall'input fino a un punto pericoloso, con nomi di source/sink/**sanitizer**
-  forniti dal modello, e *timbra* il CWE nell'evidenza.
+  forniti dal modello (o un `sink_concept` per riusare un Concept semantico), e
+  *timbra* il CWE nell'evidenza.
 - **Point detection** (verifica, in **Validation**): `run_api_misuse_query` /
   `run_insecure_config_flag_query` cercano un uso pericoloso in sé (MD5, `verify=False`),
   senza seguire un flusso.
 
-> Approfondimento su cosa fanno le due query di inventario, con il codice `.ql`, nel
-> documento gemello [agent.md](agent.md) §9 e §11.
+> Approfondimento su cosa fanno le query di inventario, con il codice `.ql`, nel
+> documento gemello [agent.md](agent.md) §9 e §12.
 
 ### 7.5 🗂️ `registry/` — i tool generati automaticamente
 Oltre ai tool statici, esistono tanti tool `check_*` "preconfezionati" (es.
@@ -318,22 +330,35 @@ flowchart LR
 
 ## 8. Il catalogo dei tool
 
-All'avvio vengono registrati **29 tool**: 13 "statici" + 16 "generati".
+All'avvio vengono registrati **41 tool** (verificato a runtime): **25 "statici"** +
+**16 "generati"** dal registry.
 
 ```mermaid
 mindmap
-  root((29 Tool))
+  root((41 Tool))
     Meta
       list_phase_tools
+      set_phase
     Esplorazione
       list_python_files
       read_file_snippet
     Database
       create_codeql_database
       analyze_database
-    Inventari (Detection, CWE-agnostici)
+      find_confirmed_vulnerabilities
+    Inventari (Gathering, deterministici, CWE-agnostici)
       find_all_flows
-      find_sensitive_operations
+      find_command_execution
+      find_code_execution
+      find_sql_execution
+      find_filesystem_access
+      find_decoding_operations
+      find_crypto_operations
+      find_weak_randomness
+      find_insecure_config_flags
+      find_exception_handling_issues
+      find_broken_sanitizer_patterns
+      find_resource_handling_issues
     Query generiche (Validation)
       run_custom_query
       run_taint_query
@@ -367,18 +392,21 @@ Descrizione dei principali:
 
 | Tool | Cosa fa |
 |---|---|
-| `list_python_files` | Elenca i file `.py` di un progetto (salta venv, .git, ecc.). |
-| `read_file_snippet` | Legge alcune righe di un file per ispezionare il contesto. |
-| `create_codeql_database` | Costruisce il database CodeQL del progetto (passo obbligato prima di analizzare). |
+| `list_python_files` | Elenca i file `.py` di un progetto (salta venv, .git, ecc.). **Fase: Detection.** |
+| `read_file_snippet` | Legge alcune righe di un file per ispezionare il contesto. **Fase: Detection soltanto** — rifiuta di girare se il server è in fase Validation (enforcement reale, non solo consultivo). |
+| `create_codeql_database` | Costruisce il database CodeQL del progetto. Chiamato direttamente dall'agente in **Gathering**, non è esposto a nessuna fase LLM. |
 | `analyze_database` | Esegue l'intera suite di sicurezza standard e restituisce i finding. |
-| `find_all_flows` | **(Detection)** Inventario CWE-agnostico di **tutti** i flussi: input non fidato (`ThreatModelSource`) → argomento di una chiamata. Deduplicato e troncato. |
-| `find_sensitive_operations` | **(Detection)** Inventario CWE-agnostico delle **operazioni sensibili senza flusso** (crypto/hash/random deboli, exec, deserializzazione, config-flag), ognuna con un `kind`. |
-| `run_taint_query` | **(Validation)** Verifica un'ipotesi di *flusso* (input → punto pericoloso) dando i nomi delle funzioni sospette; *timbra* il CWE. |
+| `find_confirmed_vulnerabilities` | Esegue l'intera suite ufficiale e restituisce risultati dedupati già certificati con CWE. Registrato ma **non cablato** in nessuna fase della pipeline automatica oggi. |
+| `find_all_flows` | **(Gathering)** Inventario CWE-agnostico di **tutti** i flussi: input non fidato (`ThreatModelSource`) → argomento di una chiamata. Deduplicato e troncato. |
+| `find_command_execution` … `find_insecure_config_flags` (8 tool) | **(Gathering)** Un tool per `kind` (command-exec, code-exec, sql-exec, filesystem, decoding, crypto, weak-random, config-flag) — sostituiscono il vecchio `find_sensitive_operations`. |
+| `find_exception_handling_issues`, `find_broken_sanitizer_patterns`, `find_resource_handling_issues` | **(Gathering)** 3 tool "non-CWE" basati su query CodeQL **ufficiali** (except troppo ampio, regex-sanitizer rotta, risorse non chiuse). |
+| `run_taint_query` | **(Validation)** Verifica un'ipotesi di *flusso* (input → punto pericoloso) dando i nomi delle funzioni sospette (o un `sink_concept`); *timbra* il CWE. |
 | `run_api_misuse_query` | Cerca l'uso di API deboli (es. md5, sha1, DES). |
 | `run_insecure_config_flag_query` | Cerca configurazioni insicure (es. `verify=False`). |
-| `run_custom_query` | Esegue un file `.ql` arbitrario. |
+| `run_custom_query` | Esegue per **nome** un file `.ql` già registrato in `CUSTOM_QUERY_DIR`. |
 | `list_cwes` / `cwe_knowledge` | Esplorano la base di conoscenza sui CWE. |
-| `list_phase_tools` | **Meta.** Dice all'agente quali tool esporre in ciascuna fase (Detection/Validation): la mappa tool→fase sta **sul server**, non è hardcoded nell'agente. |
+| `list_phase_tools` | **Meta, consultivo.** Dice all'agente quali tool esporre in Detection/Validation. I tool di Gathering non compaiono qui: l'orchestrator li chiama direttamente. |
+| `set_phase` | **Meta, enforcement.** Notifica al server la fase attiva; è ciò che fa scattare davvero il blocco di `read_file_snippet` in Validation. |
 | `check_*` | Scorciatoie preconfezionate per i casi noti (in **Validation**). |
 
 ---
@@ -434,7 +462,7 @@ mettere in un file `.env` nella radice del progetto (caricato in automatico).
 |---|---|---|
 | `CODEQL_BIN` | `codeql` | Il binario CodeQL (path completo se non è sul PATH). |
 | `MCP_TRANSPORT` | `stdio` | Canale: `stdio` / `sse` / `streamable-http`. |
-| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | Indirizzo e porta (solo rete). |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8000` | Indirizzo e porta (solo rete). Il server **non ha autenticazione**: impostare `0.0.0.0` solo deliberatamente (vedi §"Sicurezza quando esponi" più sotto). |
 | `SIBYL_LOG_LEVEL` | `INFO` | Verbosità log: `DEBUG`/`INFO`/`WARNING`/`ERROR`. |
 | `WORK_DIR` | `server/_work` | Dove finiscono database e risultati. |
 | `CODEQL_TIMEOUT` | `1800` | Timeout (secondi) per comando CodeQL. |
@@ -454,7 +482,7 @@ Cosa vedi:
   CodeQL MCP server starting
     codeql binary : /.../codeql
     search path   : /.../ql
-    tools registered: 26
+    tools registered: 41
   ```
 - **A ogni chiamata di tool**:
   ```
@@ -486,34 +514,39 @@ flowchart LR
 ## 12. Flusso completo di un'analisi
 
 Il server è **agnostico rispetto alle fasi**: espone i tool, l'agente li orchestra.
-Nel flusso reale l'agente lavora in **due fasi** (vedi [agent.md](agent.md) §2): in
-**Detection** costruisce il DB e chiama gli **inventari** (`find_all_flows`,
-`find_sensitive_operations`); in **Validation** consulta la conoscenza e lancia le
-query di **verifica** (`run_taint_query`, `run_api_misuse_query`, …). Ecco l'esempio
-end-to-end per una SQL injection:
+Nel flusso reale l'agente lavora in **tre fasi** (vedi [agent.md](agent.md) §2): in
+**Gathering** — deterministico, **nessun LLM** — costruisce il DB e chiama
+**direttamente** gli inventari (`find_all_flows` + gli 11 tool categorizzati); in
+**Detection** (LLM) legge il codice e giudica cosa conta; in **Validation** (LLM)
+consulta la conoscenza e lancia le query di **verifica** (`run_taint_query`,
+`run_api_misuse_query`, …). Ecco l'esempio end-to-end per una SQL injection:
 
 ```mermaid
 sequenceDiagram
-    participant AI as Agente AI
+    participant AG as Agente (orchestrator)
+    participant AI as LLM
     participant S as Server MCP (tools)
     participant CORE as core (executor/runner)
     participant CQL as CodeQL
 
-    note over AI,S: FASE 1 — Detection (inventari, CWE-agnostici)
-    AI->>S: list_python_files(repo)
-    S-->>AI: elenco dei file .py
-    AI->>S: read_file_snippet(file, 1, 40)
-    S-->>AI: righe del file (per capire il codice)
-    AI->>S: create_codeql_database(repo)
+    note over AG,S: FASE 0 — Gathering (deterministico, NESSUN LLM)
+    AG->>S: create_codeql_database(repo)
     S->>CORE: costruisci il DB
     CORE->>CQL: codeql database create ...
-    S-->>AI: db_path
-    AI->>S: find_all_flows(db) · find_sensitive_operations(db)
-    S->>CORE: esegui flow_inventory.ql / sensitive_ops.ql
+    S-->>AG: db_path
+    AG->>S: find_all_flows(db) · find_sql_execution(db) · ...(11 tool)
+    S->>CORE: esegui flow_inventory.ql / i template categorizzati
     CORE->>CQL: codeql database analyze ...
-    S-->>AI: inventari compatti (flow + operazioni, senza CWE)
+    S-->>AG: inventari compatti (flow + operazioni, senza CWE)
 
-    note over AI,S: FASE 2 — Validation (verifica + CWE + report)
+    note over AG,AI: FASE 1 — Detection (LLM, giudizio)
+    AG->>AI: work-list grezza (seed)
+    AI->>S: list_python_files(repo) · read_file_snippet(file, ...)
+    S-->>AI: righe del file (per capire il codice)
+    AI-->>AG: det_analysis (testo, niente CWE)
+
+    note over AG,AI: 🔄 context reset — FASE 2 — Validation (LLM, verifica + CWE + report)
+    AG->>AI: work-list + det_analysis (seed, senza codice grezzo)
     AI->>S: cwe_knowledge("CWE-89")
     S-->>AI: spiegazione + nomi tipici di "sink"
     AI->>S: run_taint_query(db, sink_names=["queryDB"], cwe="CWE-89")
@@ -521,13 +554,15 @@ sequenceDiagram
     CORE->>CQL: codeql database analyze ...
     CORE->>CORE: sarif.py → finding puliti (cwe dai @tags)
     S-->>AI: finding (file, riga, percorso del dato)
-    AI->>AI: scrive il report di sicurezza
+    AI-->>AG: report di sicurezza
 ```
 
-In parole semplici: **Detection** = esplora i file → costruisci il database →
-**inventaria** flussi e operazioni (senza CWE); **Validation** = consulta la
-conoscenza → **verifica** l'ipotesi → ottieni la prova (il percorso del dato) e il CWE
-→ scrivi il report.
+In parole semplici: **Gathering** = costruisci il database → **inventaria** flussi e
+operazioni (senza CWE, senza LLM); **Detection** = esplora i file → **giudica** cosa
+verificare; **Validation** = consulta la conoscenza → **verifica** l'ipotesi → ottieni
+la prova (il percorso del dato) e il CWE → scrivi il report. Nota: in Validation
+`read_file_snippet` è **bloccato** lato server (§7.4) — il modello non può più
+rileggere codice sorgente grezzo, solo verificare con query.
 
 ---
 
@@ -566,10 +601,17 @@ flowchart LR
   **non funzionanti**: i file `.ql` corrispondenti non esistono (mai creati). La
   stessa copertura è comunque ottenibile con `run_taint_query`. Decisione attuale:
   lasciarli così, li scriveremo in futuro se servirà.
-- L'**agente** è stato rifattorizzato nel pacchetto modulare `agent/` (vedi
-  `documentazione/agent.md`) e ricollegato al nuovo server come **client SSE**: si
-  avvia con `python -m agent <repo>` mentre il server gira separatamente
-  (`MCP_TRANSPORT=sse python -m server`).
+- **`find_confirmed_vulnerabilities`** (in `database.py`) è registrato ma **non
+  cablato** in nessuna fase della pipeline automatica: non viene chiamato né in
+  Gathering né esposto a Detection/Validation. È disponibile per un uso manuale
+  (client MCP diretto) o per un futuro step di "Evaluation" esterno alla pipeline
+  (vedi [agent.md](agent.md) §2).
+- L'**agente** è a **3 fasi** (`agent/orchestrator.py`): **Gathering** (nessun LLM,
+  costruisce il DB e chiama in blocco `find_all_flows` + gli 11 tool categorizzati),
+  **Detection** e **Validation** (LLM, con prompt e tool separati, §7.4). Si connette
+  al server come **client SSE**: si avvia con `python -m agent <repo>` mentre il
+  server gira separatamente (`MCP_TRANSPORT=sse python -m server`). Dettagli completi
+  in [documentazione/agent.md](agent.md).
 
 ---
 
@@ -731,38 +773,51 @@ fondato**. È esposta al modello tramite i tool `list_cwes` e `cwe_knowledge(cwe
 
 ```mermaid
 sequenceDiagram
-    participant LLM as LLM (Ollama)
-    participant AG as agent.py
+    participant AG as Agente (python -m agent)
     participant SRV as Server MCP
-    AG->>SRV: lista i tool disponibili
-    SRV-->>AG: 29 tool (nome, descrizione, parametri)
-    AG->>LLM: "ecco i tool che puoi usare" (+ system prompt)
-    loop fino al report
-        LLM-->>AG: "voglio chiamare TOOL con questi argomenti"
+    participant LLM as LLM (Ollama/gemini/openai)
+    note over AG,SRV: GATHERING — nessun LLM, l'agente chiama direttamente
+    AG->>SRV: create_codeql_database + find_all_flows + 11 tool categorizzati
+    SRV-->>AG: work-list grezza (candidates + operations)
+    AG->>SRV: lista i tool per fase (list_phase_tools)
+    SRV-->>AG: 41 tool totali; Detection ne vede 2, Validation ~6 + tutti i check_*
+    AG->>LLM: "ecco i tool che puoi usare" (+ system prompt di fase)
+    loop DETECTION (fino a det_analysis)
+        LLM-->>AG: "voglio chiamare list_python_files/read_file_snippet"
         AG->>SRV: esegui TOOL(args)
         SRV-->>AG: risultato (JSON)
+        AG->>LLM: ecco il risultato
+    end
+    LLM-->>AG: det_analysis (testo, niente CWE)
+    note over AG,LLM: 🔄 context reset — seed = work-list + det_analysis
+    loop VALIDATION (fino al report)
+        LLM-->>AG: "voglio chiamare cwe_knowledge / run_*_query / check_*"
+        AG->>SRV: esegui TOOL(args)
+        SRV-->>AG: risultato (JSON, CWE timbrato)
         AG->>LLM: ecco il risultato
     end
     LLM-->>AG: report finale (niente più tool)
 ```
 
-L'agente fa da **tramite**: espone i tool del server al modello in formato function
-calling ed esegue ad ogni turno ciò che il modello chiede. Il modello **non esegue
-nulla da solo**: dice solo *cosa* vuole. (Robustezza: recupero delle chiamate
-emesse come testo, cache anti-loop, checkpoint, correzione del `db_path`.)
+L'agente fa da **tramite** nelle due fasi LLM: espone i tool del server al modello in
+formato function calling ed esegue ad ogni turno ciò che il modello chiede. Il modello
+**non esegue nulla da solo**: dice solo *cosa* vuole. (Robustezza: recupero delle
+chiamate emesse come testo, cache anti-loop, checkpoint, correzione del `db_path` e
+degli argomenti di `read_file_snippet`, rilevamento di testo degenerato — dettagli nel
+documento gemello [agent.md](agent.md) §16.)
 
 ### Flusso guidato (dal system prompt dell'agente)
 
 ```mermaid
 flowchart TB
-    S1["1. list_python_files"] --> S2["2. read_file_snippet su OGNI file<br/>(individua i sospetti)"]
-    S2 --> S3["3. create_codeql_database"]
-    S3 --> S4{"per ogni classe SOSPETTA"}
+    G0["GATHERING (no LLM)<br/>create_codeql_database<br/>+ find_all_flows + 11 tool categorizzati"] --> S1
+    S1["1. list_python_files"] --> S2["2. read_file_snippet sui punti segnalati<br/>(DETECTION: giudica rilevanza, non scopre)"]
+    S2 --> S3["3. scrivi det_analysis (niente CWE)"]
+    S3 -.->|"context reset"| S4{"VALIDATION:<br/>per ogni flow/operazione"}
     S4 --> S5["4a. cwe_knowledge(cwe)<br/>(quale tool? quali nomi?)"]
-    S5 --> S6["4b. VERIFICA col tool indicato"]
+    S5 --> S6["4b. VERIFICA col tool indicato<br/>(read_file_snippet qui è BLOCCATO)"]
     S6 --> S4
-    S4 -->|finito| S7["5. read_file_snippet (conferma)"]
-    S7 --> S8["6. scrivi il REPORT"]
+    S4 -->|finito| S8["5. scrivi il REPORT"]
 ```
 
 ### Statici vs check_* (il passo di verifica 4b)
@@ -1015,11 +1070,11 @@ EOF
 ### Fase 6 — Validazione
 ```bash
 cd ~/Sibyl && source .venv/bin/activate
-python -m server                                   # banner: "tools registered: 26" (Ctrl-C)
-python -m pytest server/tests/test_server.py -q    # atteso: 34 passed (~2-3 min)
+python -m server                                   # banner: "tools registered: 41" (Ctrl-C)
+python -m pytest server/tests/test_server.py -q    # atteso: 63 passed (~6-7 min, richiede il binario CodeQL)
 ollama list
 ```
-Successo = banner ok + **34 test verdi** sul server.
+Successo = banner ok + **63 test verdi** sul server.
 
 ## D: Quando ha senso esporre il MCP server in rete?
 
@@ -1100,7 +1155,7 @@ flowchart TB
         CL["Client / trigger via SSH"]
     end
     subgraph SRV["Server Ubuntu (compute)"]
-        AG["Agent (agent.py) - processo 1"]
+        AG["Agente (python -m agent) - processo 1"]
         OLL["Ollama + qwen2.5-coder - processo 2"]
         MCPP["MCP server (python -m server, SSE :8000) - processo 3"]
         TC["Toolchain CodeQL (binario + libreria standard)"]
@@ -1188,15 +1243,15 @@ sequenceDiagram
     participant RUN as transport/run
     OP->>MAIN: MCP_TRANSPORT=sse python -m server
     MAIN->>TOOLS: import moduli (side effect)
-    TOOLS->>MCP: @mcp.tool() registra 10 tool statici
+    TOOLS->>MCP: @mcp.tool() registra 25 tool statici
     MAIN->>REG: import loader (side effect)
     REG->>MCP: add_tool() x16 (check_*)
-    MAIN->>MCP: log banner "tools registered: 26"
+    MAIN->>MCP: log banner "tools registered: 41"
     MAIN->>RUN: run()
     RUN->>MCP: mcp.run(transport=sse)
     Note over MCP: listener SSE su :8000 in ascolto
-    OP->>OP: (altro processo) python agent.py repo
-    Note over OP,MCP: l'agente fa sse_client(URL) -> initialize -> list_tools (26)
+    OP->>OP: (altro processo) python -m agent repo
+    Note over OP,MCP: l'agente fa sse_client(URL) -> initialize -> list_tools (41),<br/>poi list_phase_tools() per sapere cosa esporre a Detection/Validation
 ```
 
 ### 4) Esecuzione di una query (end-to-end attraverso i componenti)
