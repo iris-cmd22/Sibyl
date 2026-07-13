@@ -284,17 +284,29 @@ class RunStats:
             "---\n\n"
         )
 
+    # Obiettivo: dare ai consumer esterni (l'estensione VSCode, per i diagnostics) gli
+    #            stessi finding deduplicati della tabella, ma come JSON strutturato invece
+    #            che testo Markdown da ri-parsare.
+    # Input:    nessuno (usa self.findings). Output: stringa JSON {"findings": [...]}.
+    def _findings_json(self) -> str:
+        out = []
+        for f in self._dedup_findings():
+            out.append({**f, "severity_bucket": _severity_bucket(f.get("security_severity"))})
+        return json.dumps({"findings": out}, ensure_ascii=False, indent=2)
+
     # Obiettivo: scrivere il report finale (intestazione + corpo) su disco e ripulire.
     # Input:    report_text = il corpo scritto dal modello; report_path = file di output;
     #           checkpoint = file di checkpoint da rimuovere a fine analisi (opzionale).
     # Output:   il testo completo del report (intestazione + corpo) come stringa.
     # Come realizzato: antepone header() al corpo, crea le cartelle necessarie, scrive il
-    #            file e cancella il checkpoint (analisi completata).
+    #            file (+ un gemello .json coi finding, per i diagnostics) e cancella il
+    #            checkpoint (analisi completata).
     def finalize(self, report_text: str, report_path: str, checkpoint: Path | None = None) -> str:
         full = self.header() + (report_text or "(no report produced)")
         out = Path(report_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(full, encoding="utf-8")
+        out.with_suffix(".json").write_text(self._findings_json(), encoding="utf-8")
         if checkpoint is not None:
             checkpoint.unlink(missing_ok=True)   # analysis complete
         return full

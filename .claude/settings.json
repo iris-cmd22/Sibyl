@@ -25,7 +25,8 @@
       "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
       "PowerShell(python -m agent _smoketest_repo --provider ollama --model qwen2.5-coder:14b)",
       "Bash(python -c \"from agent.orchestrator import _strip_leftover_table, _cited_cwes; print\\('OK'\\)\")",
-      "Bash(python -m pytest -m \"not codeql and not llm\" -q)"
+      "Bash(python -m pytest -m \"not codeql and not llm\" -q)",
+      "Bash(npx eslint *)"
     ]
   }
 }

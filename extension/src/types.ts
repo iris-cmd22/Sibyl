@@ -30,3 +30,25 @@ export interface RunResult {
   exitCode: number;
   reportPath: string;
 }
+
+/** Un hop di un data-flow (source→sink), o la posizione singola di un point-detection. */
+export interface FindingLoc {
+  file: string;
+  line: number;
+  note?: string;
+}
+
+/** Un finding confermato, come scritto da agent/report.py:RunStats._findings_json(). */
+export interface Finding {
+  cwe: string | null;
+  file: string;
+  line: number;
+  rule_id: string | null;
+  message: string | null;
+  security_severity: string;
+  severity_bucket: 'Critical' | 'High' | 'Medium' | 'Low' | 'Unknown';
+  source: FindingLoc | null;
+  sink: FindingLoc | null;
+  flow_steps: number;
+  flow_path: FindingLoc[];
+}

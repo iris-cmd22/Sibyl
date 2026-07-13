@@ -185,6 +185,29 @@ def test_findings_dedup_reclassified_supersedes_unclassified():
     assert "UNCLASSIFIED" not in stats.findings_table()
 
 
+def test_finalize_writes_findings_json_sidecar(tmp_path: Path):
+    # L'estensione VSCode legge questo .json (gemello del .md) per popolare i
+    # diagnostics nel Problems panel — deve contenere gli stessi finding deduplicati
+    # della tabella, col bucket di severità già calcolato.
+    stats = RunStats(model="m", repo_path="r", max_steps=30)
+    stats.record_tool_result("run_custom_query", json.dumps({"finding_count": 1, "findings": [
+        {"cwe": "CWE-327", "file": "crypto.py", "line": 8, "rule_id": "py/weak-crypto",
+         "message": "MD5 is weak", "security_severity": "7.0", "source": None, "sink": None,
+         "flow_steps": 0},
+    ]}))
+    report_path = tmp_path / "report.md"
+    stats.finalize("body", str(report_path))
+
+    json_path = report_path.with_suffix(".json")
+    assert json_path.exists()
+    findings = json.loads(json_path.read_text(encoding="utf-8"))["findings"]
+    assert len(findings) == 1
+    assert findings[0]["cwe"] == "CWE-327"
+    assert findings[0]["file"] == "crypto.py"
+    assert findings[0]["line"] == 8
+    assert findings[0]["severity_bucket"] == "High"
+
+
 # --------------------------------------------------------------------------- #
 # leftover-table stripping (orchestrator.py): a weak model sometimes still drafts
 # its own table/report heading in the free commentary — must not leak into the report.

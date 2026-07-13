@@ -7,12 +7,24 @@ import { isServerUp, resolveConfig, runAgent, startServer, stopServer } from './
 import { renderMarkdown } from './markdown';
 import { envFilePath, readEnvValues, renderConfigHtml, writeEnvValues } from './envConfig';
 import { createProgressPanel } from './progressView';
+import { Finding } from './types';
 
 let channel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
+let diagnostics: vscode.DiagnosticCollection;
+
+/** Mappa il bucket di severità (agent/report.py:_severity_bucket) sulla severità VSCode. */
+const SEVERITY_MAP: Record<string, vscode.DiagnosticSeverity> = {
+  Critical: vscode.DiagnosticSeverity.Error,
+  High: vscode.DiagnosticSeverity.Error,
+  Medium: vscode.DiagnosticSeverity.Warning,
+  Low: vscode.DiagnosticSeverity.Information,
+  Unknown: vscode.DiagnosticSeverity.Information,
+};
 
 export function activate(context: vscode.ExtensionContext) {
   channel = vscode.window.createOutputChannel('Sibyl');
+  diagnostics = vscode.languages.createDiagnosticCollection('sibyl');
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.text = '$(shield) Sibyl';
@@ -22,6 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     channel,
+    diagnostics,
     statusBarItem,
     vscode.commands.registerCommand('sibyl.analyzeRepository', () => analyzeRepository(context)),
     vscode.commands.registerCommand('sibyl.startServer', async () => {
@@ -162,6 +175,7 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
   }
 
   const reportPath = path.join(os.tmpdir(), `sibyl-report-${Date.now()}.md`);
+  diagnostics.clear(); // via i diagnostics della repo/run precedente
   channel.show(true);
 
   // Vista grafica di avanzamento (al posto dei log): riceve gli eventi dell'agent.
@@ -188,6 +202,7 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
         }
         const markdown = readReport(reportPath);
         showReport(context, path.basename(repoPath), markdown);
+        applyDiagnosticsFromReport(reportPath, repoPath);
       } catch (err: any) {
         vscode.window.showErrorMessage(`Sibyl: impossibile avviare l'agent — ${err.message}`);
       }
@@ -257,4 +272,84 @@ function showReport(context: vscode.ExtensionContext, title: string, markdown: s
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Legge il file JSON gemello del report (scritto da agent/report.py:RunStats.finalize)
+ * e popola il Problems panel. Non fatale: se manca o è malformato, il report resta
+ * comunque visibile senza diagnostics.
+ */
+function applyDiagnosticsFromReport(reportPath: string, repoPath: string): void {
+  const jsonPath = reportPath.replace(/\.md$/, '.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    applyDiagnostics(repoPath, parsed.findings || []);
+  } catch {
+    /* nessun JSON dei finding per questo run */
+  }
+}
+
+/** Risolve `file` (relativo a repoPath, come nel SARIF di CodeQL) in un URI assoluto,
+ *  verificando che resti dentro repoPath (stesso controllo di progressView.ts). */
+function resolveRepoFile(repoPath: string, file: string): vscode.Uri | undefined {
+  const repoRoot = path.resolve(repoPath);
+  const abs = path.isAbsolute(file) ? path.resolve(file) : path.resolve(repoRoot, file);
+  if (abs !== repoRoot && !abs.startsWith(repoRoot + path.sep)) {
+    return undefined;
+  }
+  return vscode.Uri.file(abs);
+}
+
+function toDiagnosticRange(line: number): vscode.Range {
+  const l = Math.max(0, line - 1);
+  return new vscode.Range(l, 0, l, Number.MAX_SAFE_INTEGER); // VSCode clampa a fine riga reale
+}
+
+/** Costruisce un vscode.Diagnostic per file e li registra nella DiagnosticCollection. */
+function applyDiagnostics(repoPath: string, findings: Finding[]): void {
+  const byFile = new Map<string, { uri: vscode.Uri; diags: vscode.Diagnostic[] }>();
+
+  for (const f of findings) {
+    if (!f.file || !f.line) {
+      continue;
+    }
+    const uri = resolveRepoFile(repoPath, f.file);
+    if (!uri) {
+      continue;
+    }
+
+    const diag = new vscode.Diagnostic(
+      toDiagnosticRange(f.line),
+      `${f.cwe ?? 'UNCLASSIFIED'} (${f.rule_id ?? 'unknown-rule'}): ${f.message ?? ''}`,
+      SEVERITY_MAP[f.severity_bucket] ?? vscode.DiagnosticSeverity.Information,
+    );
+    diag.source = 'Sibyl';
+    if (f.rule_id) {
+      diag.code = f.rule_id;
+    }
+
+    if (f.flow_steps > 0 && f.source && (f.source.file !== f.file || f.source.line !== f.line)) {
+      const srcUri = resolveRepoFile(repoPath, f.source.file);
+      if (srcUri) {
+        diag.relatedInformation = [
+          new vscode.DiagnosticRelatedInformation(
+            new vscode.Location(srcUri, toDiagnosticRange(f.source.line)),
+            'Origine del dato non fidato',
+          ),
+        ];
+      }
+    }
+
+    const key = uri.toString();
+    let entry = byFile.get(key);
+    if (!entry) {
+      entry = { uri, diags: [] };
+      byFile.set(key, entry);
+    }
+    entry.diags.push(diag);
+  }
+
+  for (const { uri, diags } of byFile.values()) {
+    diagnostics.set(uri, diags);
+  }
 }

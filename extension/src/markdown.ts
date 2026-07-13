@@ -20,6 +20,17 @@ function inline(text: string): string {
   return s;
 }
 
+const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+function isTableRow(line: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(line);
+}
+
+/** Spezza una riga `| a | b |` nelle sue celle, senza le pipe esterne. */
+function splitTableRow(line: string): string[] {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+}
+
 export function renderMarkdown(md: string): string {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   let html = '';
@@ -91,6 +102,21 @@ export function renderMarkdown(md: string): string {
     if (bq) {
       closeList();
       html += `<blockquote>${inline(bq[1])}</blockquote>`;
+      continue;
+    }
+
+    if (isTableRow(line) && i + 1 < lines.length && TABLE_SEPARATOR_RE.test(lines[i + 1])) {
+      closeList();
+      const header = splitTableRow(line);
+      html += `<table><thead><tr>${header.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>`;
+      i += 2; // salta intestazione + riga separatore
+      while (i < lines.length && isTableRow(lines[i])) {
+        const cells = splitTableRow(lines[i]);
+        html += `<tr>${cells.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`;
+        i++;
+      }
+      html += '</tbody></table>';
+      i--; // il for-loop farà i++ per portarsi sulla riga successiva non consumata
       continue;
     }
 
