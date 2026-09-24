@@ -1,0 +1,1148 @@
+{
+  "CWE-89": {
+    "name": "SQL Injection",
+    "detection": "taint",
+    "description": "User-controlled data is concatenated into a SQL statement that is then executed, letting an attacker alter the query (read/modify data, bypass auth).",
+    "taint_intuition": "Source = user input (HTTP params, body, CLI). Sink = the SQL string argument of a DB execution call. Sanitizer = parameterized queries / proper escaping.",
+    "typical_sink_names": [
+      "execute",
+      "executemany",
+      "executescript",
+      "exec",
+      "query",
+      "raw",
+      "raw_query",
+      "rawquery",
+      "queryDB",
+      "_query",
+      "execute_query",
+      "execquery",
+      "read_sql",
+      "read_sql_query",
+      "read_sql_table",
+      "sql"
+    ],
+    "typical_source_names": [
+      "get_json",
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "quote",
+      "escape",
+      "escape_string",
+      "quote_identifier"
+    ],
+    "remediation": "Use parameterized queries / prepared statements; never build SQL by string concatenation with user input.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/89.html"
+    ],
+    "mitre_name": "Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
+    "mitre_description": "The product constructs all or part of an SQL command using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements that could modify the intended SQL command when it is sent to a downstream component. Without sufficient removal or quoting of SQL syntax in user-controllable inputs, the generated SQL query can cause those inputs to be interpreted as SQL instead of ordinary user data.",
+    "mitre_mitigations": [
+      "Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid [REF-1482]. \n                   For example, consider using persistence layers such as Hibernate or Enterprise Java Beans, which can provide significant protection against SQL injection if used properly.",
+      "If available, use structured mechanisms that automatically enforce the separation between data and code. These mechanisms may be able to provide the relevant quoting, encoding, and validation automatically, instead of relying on the developer to provide this capability at every point where output is generated. \n                   Process SQL queries using prepared statements, parameterized queries, or stored procedures. These features should accept parameters or variables and support strong typing. Do not dynamically construct and execute query strings within these features using \"exec\" or similar functionality, since this may re-introduce the possibility of SQL injection. [REF-867]",
+      "Run your code using the lowest privileges that are required to accomplish the necessary tasks [REF-76]. If possible, create isolated accounts with limited privileges that are only used for a single task. That way, a successful attack will not immediately give the attacker access to the rest of the software or its environment. For example, database applications rarely need to run as the database administrator, especially in day-to-day operations. \n                   Specifically, follow the principle of least privilege when creating user accounts to a SQL database. The database users should only have the minimum privileges necessary to use their account. If the requirements of the system indicate that a user can read and modify their own data, then limit their privileges so they cannot read/write others' data. Use the strictest permissions possible on all database objects, such as execute-only for stored procedures."
+    ],
+    "actions": {
+      "tool": "check_sql_injection",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_sql_injection(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-89', sink_names=<candidates below + any real wrapper names you saw in the code>).",
+      "candidate_sink_names": [
+        "execute",
+        "executemany",
+        "executescript",
+        "exec",
+        "query",
+        "raw",
+        "raw_query",
+        "rawquery",
+        "queryDB",
+        "_query",
+        "execute_query",
+        "execquery",
+        "read_sql",
+        "read_sql_query",
+        "read_sql_table",
+        "sql"
+      ],
+      "candidate_source_names": [
+        "get_json",
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "quote",
+        "escape",
+        "escape_string",
+        "quote_identifier"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a SQL Injection sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Confidentiality, Integrity, Availability: Execute Unauthorized Code or Commands",
+      "Confidentiality: Read Application Data",
+      "Authentication: Gain Privileges or Assume Identity, Bypass Protection Mechanism",
+      "Access Control: Bypass Protection Mechanism",
+      "Integrity: Modify Application Data"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-6847: SQL injection in AI chatbot via a conversation message",
+      "CVE-2025-26794: SQL injection in e-mail agent through SQLite integration",
+      "CVE-2023-32530: SQL injection in security product dashboard using crafted certificate fields"
+    ]
+  },
+  "CWE-78": {
+    "name": "OS Command Injection",
+    "detection": "taint",
+    "description": "User-controlled data flows into an OS command that is executed by a shell, letting an attacker run arbitrary commands.",
+    "taint_intuition": "Source = user input. Sink = the command/argument of a process-execution call. Sanitizer = shlex.quote / argument-list form / shell=False.",
+    "typical_sink_names": [
+      "system",
+      "popen",
+      "Popen",
+      "call",
+      "run",
+      "check_call",
+      "check_output",
+      "getoutput",
+      "getstatusoutput",
+      "spawn",
+      "spawnl",
+      "spawnv",
+      "exec",
+      "execl",
+      "execv"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "quote",
+      "escape",
+      "shlex_quote"
+    ],
+    "remediation": "Avoid shell=True; pass arguments as a list to subprocess; validate/escape with shlex.quote.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/78.html"
+    ],
+    "mitre_name": "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')",
+    "mitre_description": "The product constructs all or part of an OS command using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements that could modify the intended OS command when it is sent to a downstream component.",
+    "mitre_extended_description": "This weakness can lead to a vulnerability in environments in which the attacker does not have direct access to the operating system, such as in web applications. Alternately, if the weakness occurs in a privileged program, it could allow the attacker to specify commands that normally would not be accessible, or to call alternate commands with privileges that the attacker does not have. The problem is exacerbated if the compromised process does not follow the principle of least privilege, because the attacker-controlled commands may run with special system privileges that increases the amount of damage. \n             There are at least two subtypes of OS command injection: \n                \n\t\t\t\t  The application intends to execute a single, fixed program that is under its own control. It intends to use externally-supplied inputs as arguments to that program. For example, the program might use system(\"nslookup [HOSTNAME]\") to run nslookup and allow the user to supply a HOSTNAME, which is used as an argument. Attackers cannot prevent nslookup from executing. However, if the program does not remove command separators from the HOSTNAME argument, attackers could place the separators into the arguments, which allows them to execute their own program after nslookup has finished executing. \n\t\t\t\t  The application accepts an input that it uses to fully select which program to run, as well as which commands to use. The application simply redirects this entire command to the operating system. For example, the program might use \"exec([COMMAND])\" to execute the [COMMAND] that was supplied by the user. If the COMMAND is under attacker control, then the attacker can execute arbitrary commands or programs. If the command is being executed using functions like exec() and CreateProcess(), the attacker might not be able to combine multiple commands together in the same line. \n                \n             From a weakness standpoint, these variants represent distinct programmer errors. In the first variant, the programmer clearly intends that input from untrusted parties will be part of the arguments in the command to be executed. In the second variant, the programmer does not intend for the command to be accessible to any untrusted party, but the programmer probably has not accounted for alternate ways in which malicious attackers can provide input.",
+    "mitre_mitigations": [
+      "If at all possible, use library calls rather than external processes to recreate the desired functionality.",
+      "Run the code in a \"jail\" or similar sandbox environment that enforces strict boundaries between the process and the operating system. This may effectively restrict which files can be accessed in a particular directory or which commands can be executed by the software. \n                   OS-level examples include the Unix chroot jail, AppArmor, and SELinux. In general, managed code may provide some protection. For example, java.io.FilePermission in the Java SecurityManager allows the software to specify restrictions on file operations. \n                   This may not be a feasible solution, and it only limits the impact to the operating system; the rest of the application may still be subject to compromise. \n                   Be careful to avoid CWE-243 and other weaknesses related to jails.",
+      "For any data that will be used to generate a command to be executed, keep as much of that data out of external control as possible. For example, in web applications, this may require storing the data locally in the session's state instead of sending it out to the client in a hidden form field."
+    ],
+    "actions": {
+      "tool": "check_os_command_injection",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_os_command_injection(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-78', sink_names=<candidates below + any real wrapper names you saw in the code>).",
+      "candidate_sink_names": [
+        "system",
+        "popen",
+        "Popen",
+        "call",
+        "run",
+        "check_call",
+        "check_output",
+        "getoutput",
+        "getstatusoutput",
+        "spawn",
+        "spawnl",
+        "spawnv",
+        "exec",
+        "execl",
+        "execv"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "quote",
+        "escape",
+        "shlex_quote"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a OS Command Injection sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Confidentiality, Integrity, Availability, Non-Repudiation: Execute Unauthorized Code or Commands, DoS: Crash, Exit, or Restart, Read Files or Directories, Modify Files or Directories, Read Application Data, Modify Application Data, Hide Activities"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-53899: Virtual environment builder does not correctly quote \"magic\" template strings, allowing OS command injection using a directory whose name contains shell metacharacters",
+      "CVE-2025-44844: file upload functionality in wireless access point allows OS command injection via shell metacharacters through the file name in a Content-Disposition header",
+      "CVE-2024-6091: Chain: AI agent platform does not restrict pathnames containing internal \"/./\" sequences (CWE-55), leading to an incomplete denylist (CWE-184) that does not prevent OS command injection (CWE-78)"
+    ]
+  },
+  "CWE-22": {
+    "name": "Path Traversal",
+    "detection": "taint",
+    "description": "User-controlled data is used to build a filesystem path without restriction, letting an attacker read/write files outside the intended directory via '..' sequences.",
+    "taint_intuition": "Source = user input. Sink = the path argument of a file-access call. Sanitizer = canonicalization + base-dir containment check.",
+    "typical_sink_names": [
+      "open",
+      "read",
+      "write",
+      "send_file",
+      "sendfile",
+      "send_from_directory",
+      "join",
+      "joinpath",
+      "makedirs",
+      "mkdir",
+      "remove",
+      "unlink",
+      "copy",
+      "move"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param",
+      "filename"
+    ],
+    "typical_sanitizer_names": [
+      "abspath",
+      "realpath",
+      "normpath",
+      "secure_filename",
+      "basename"
+    ],
+    "remediation": "Canonicalize paths and verify they stay within an allowed base directory; reject '..' segments; use secure_filename.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/22.html"
+    ],
+    "mitre_name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')",
+    "mitre_description": "The product uses external input to construct a pathname that is intended to identify a file or directory that is located underneath a restricted parent directory, but the product does not properly neutralize special elements within the pathname that can cause the pathname to resolve to a location that is outside of the restricted directory.",
+    "mitre_extended_description": "Many file operations are intended to take place within a restricted directory. By using special elements such as \"..\" and \"/\" separators, attackers can escape outside of the restricted location to access files or directories that are elsewhere on the system. One of the most common special elements is the \"../\" sequence, which in most modern operating systems is interpreted as the parent directory of the current location. This is referred to as relative path traversal. Path traversal also covers the use of absolute pathnames such as \"/usr/local/bin\" to access unexpected files. This is referred to as absolute path traversal.",
+    "mitre_mitigations": [
+      "Assume all input is malicious. Use an \"accept known good\" input validation strategy, i.e., use a list of acceptable inputs that strictly conform to specifications. Reject any input that does not strictly conform to specifications, or transform it into something that does. \n                   When performing input validation, consider all potentially relevant properties, including length, type of input, the full range of acceptable values, missing or extra inputs, syntax, consistency across related fields, and conformance to business rules. As an example of business rule logic, \"boat\" may be syntactically valid because it only contains alphanumeric characters, but it is not valid if the input is only expected to contain colors such as \"red\" or \"blue.\" \n                   Do not rely exclusively on looking for malicious or malformed inputs.  This is likely to miss at least one undesirable input, especially if the code's environment changes. This can give attackers enough room to bypass the intended validation. However, denylists can be useful for detecting potential attacks or determining which inputs are so malformed that they should be rejected outright. \n                   When validating filenames, use stringent allowlists that limit the character set to be used. If feasible, only allow a single \".\" character in the filename to avoid weaknesses such as CWE-23, and exclude directory separators such as \"/\" to avoid CWE-36. Use a list of allowable file extensions, which will help to avoid CWE-434. \n                   Do not rely exclusively on a filtering mechanism that removes potentially dangerous characters. This is equivalent to a denylist, which may be incomplete (CWE-184). For example, filtering \"/\" is insufficient protection if the filesystem also supports the use of \"\\\" as a directory separator. Another possible error could occur when the filtering is applied in a way that still produces dangerous data (CWE-182). For example, if \"../\" sequences are removed from the \".../...//\" string in a sequential fashion, two instances of \"../\" would be removed from the original string, but the remaining characters would still form the \"../\" string.",
+      "For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side, in order to avoid CWE-602. Attackers can bypass the client-side checks by modifying values after the checks have been performed, or by changing the client to remove the client-side checks entirely. Then, these modified values would be submitted to the server.",
+      "Inputs should be decoded and canonicalized to the application's current internal representation before being validated (CWE-180). Make sure that the application does not decode the same input twice (CWE-174). Such errors could be used to bypass allowlist validation schemes by introducing dangerous inputs after they have been checked. \n                   Use a built-in path canonicalization function (such as realpath() in C) that produces the canonical version of the pathname, which effectively removes \"..\" sequences and symbolic links (CWE-23, CWE-59). This includes: \n                      \n                         realpath() in C \n                         getCanonicalPath() in Java \n                         GetFullPath() in ASP.NET \n                         realpath() or abs_path() in Perl \n                         realpath() in PHP"
+    ],
+    "actions": {
+      "tool": "check_path_traversal",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_path_traversal(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-22', sink_names=<candidates below + any real wrapper names you saw in the code>).",
+      "candidate_sink_names": [
+        "open",
+        "read",
+        "write",
+        "send_file",
+        "sendfile",
+        "send_from_directory",
+        "join",
+        "joinpath",
+        "makedirs",
+        "mkdir",
+        "remove",
+        "unlink",
+        "copy",
+        "move"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param",
+        "filename"
+      ],
+      "candidate_sanitizer_names": [
+        "abspath",
+        "realpath",
+        "normpath",
+        "secure_filename",
+        "basename"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Path Traversal sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Integrity, Confidentiality, Availability: Execute Unauthorized Code or Commands",
+      "Integrity: Modify Files or Directories",
+      "Confidentiality: Read Files or Directories",
+      "Availability: DoS: Crash, Exit, or Restart"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-37032: Large language model (LLM) management tool does not\n               validate the format of a digest value (CWE-1287) from a\n               private, untrusted model registry, enabling relative\n               path traversal (CWE-23), a.k.a. Probllama",
+      "CVE-2024-4315: Chain: API for text generation using Large Language Models (LLMs) does\n\t\t\t   not include the \"\\\" Windows folder separator in its denylist (CWE-184)\n\t\t\t   when attempting to prevent Local File Inclusion via path traversal\n\t\t\t   (CWE-22), allowing deletion of arbitrary files on Windows systems.",
+      "CVE-2024-0520: Product for managing datasets for AI model training and evaluation allows both relative (CWE-23) and absolute (CWE-36) path traversal to overwrite files via the Content-Disposition header"
+    ]
+  },
+  "CWE-79": {
+    "name": "Cross-site Scripting (XSS)",
+    "detection": "taint",
+    "description": "User-controlled data is reflected into an HTML response without proper encoding, letting an attacker run script in victims' browsers.",
+    "taint_intuition": "Source = user input. Sink = a response/markup call that emits HTML. Sanitizer = context-aware HTML escaping / template auto-escaping.",
+    "typical_sink_names": [
+      "render_template_string",
+      "Markup",
+      "mark_safe",
+      "HttpResponse",
+      "Response",
+      "write",
+      "format_html"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "escape",
+      "clean",
+      "bleach_clean",
+      "quote"
+    ],
+    "remediation": "Context-aware output encoding; use template auto-escaping; never mark user input as safe.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/79.html"
+    ],
+    "mitre_name": "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')",
+    "mitre_description": "The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.",
+    "mitre_extended_description": "There are many variants of cross-site scripting, characterized by a variety of terms or involving different attack topologies. However, they all indicate the same fundamental weakness: improper neutralization of dangerous input between the adversary and a victim.",
+    "mitre_mitigations": [
+      "Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid [REF-1482]. \n                   Examples of libraries and frameworks that make it easier to generate properly encoded output include Microsoft's Anti-XSS library, the OWASP ESAPI Encoding module, and Apache Wicket.",
+      "Understand the context in which your data will be used and the encoding that will be expected. This is especially important when transmitting data between different components, or when generating outputs that can contain multiple encodings at the same time, such as web pages or multi-part mail messages. Study all expected communication protocols and data representations to determine the required encoding strategies. \n                   For any data that will be output to another web page, especially any data that was received from external inputs, use the appropriate encoding on all non-alphanumeric characters. \n                   Parts of the same output document may require different encodings, which will vary depending on whether the output is in the: \n                      \n                         HTML body \n                         Element attributes (such as src=\"XYZ\") \n                         URIs \n                         JavaScript sections \n                         Cascading Style Sheets and style property \n                      \n                   etc. Note that HTML Entity Encoding is only appropriate for the HTML body. \n                   Consult the XSS Prevention Cheat Sheet [REF-724] for more details on the types of encoding and escaping that are needed.",
+      "Understand all the potential areas where untrusted inputs can enter your software: parameters or arguments, cookies, anything read from the network, environment variables, reverse DNS lookups, query results, request headers, URL components, e-mail, files, filenames, databases, and any external systems that provide data to the application. Remember that such inputs may be obtained indirectly through API calls."
+    ],
+    "actions": {
+      "tool": "check_xss",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_xss(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-79', sink_names=<candidates below + any real wrapper names you saw in the code>).",
+      "candidate_sink_names": [
+        "render_template_string",
+        "Markup",
+        "mark_safe",
+        "HttpResponse",
+        "Response",
+        "write",
+        "format_html"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "escape",
+        "clean",
+        "bleach_clean",
+        "quote"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Cross-site Scripting (XSS) sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Access Control, Confidentiality: Bypass Protection Mechanism, Read Application Data",
+      "Integrity, Confidentiality, Availability: Execute Unauthorized Code or Commands",
+      "Confidentiality, Integrity, Availability, Access Control: Execute Unauthorized Code or Commands, Bypass Protection Mechanism, Read Application Data"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-49038: XSS in AI assistant",
+      "CVE-2024-54142: Plugin that enables AI features allows input with html entities, leading to XSS",
+      "CVE-2021-25926: Python Library Manager did not sufficiently neutralize a user-supplied search term, allowing reflected XSS."
+    ]
+  },
+  "CWE-502": {
+    "name": "Deserialization of Untrusted Data",
+    "detection": "taint",
+    "description": "User-controlled data is deserialized with an unsafe loader, allowing object injection and often remote code execution.",
+    "taint_intuition": "Source = user input. Sink = the data argument of an unsafe deserialization call. Sanitizer = safe formats/loaders (json, yaml.safe_load).",
+    "typical_sink_names": [
+      "loads",
+      "load",
+      "Unpickler",
+      "decode",
+      "from_yaml",
+      "load_all"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param",
+      "get_data"
+    ],
+    "typical_sanitizer_names": [
+      "safe_load"
+    ],
+    "remediation": "Do not unpickle / yaml.load untrusted data; use safe formats (json) or yaml.safe_load.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/502.html"
+    ],
+    "mitre_name": "Deserialization of Untrusted Data",
+    "mitre_description": "The product deserializes untrusted data without sufficiently ensuring that the resulting data will be valid.",
+    "mitre_mitigations": [
+      "If available, use the signing/sealing features of the programming language to assure that deserialized data has not been tainted. For example, a hash-based message authentication code (HMAC) could be used to ensure that data has not been modified.",
+      "When deserializing data, populate a new object rather than just deserializing. The result is that the data flows through safe input validation and that the functions are safe.",
+      "Explicitly define a final object() to prevent deserialization."
+    ],
+    "actions": {
+      "tool": "check_deserialization",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_deserialization(db_path). If none of them finds it and you suspect a custom wrapper function not covered by them, fall back to run_taint_query(cwe='CWE-502', sink_names=<candidates below + any real wrapper names you saw in the code>).",
+      "candidate_sink_names": [
+        "loads",
+        "load",
+        "Unpickler",
+        "decode",
+        "from_yaml",
+        "load_all"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param",
+        "get_data"
+      ],
+      "candidate_sanitizer_names": [
+        "safe_load"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Deserialization of Untrusted Data sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Integrity: Modify Application Data, Unexpected State",
+      "Availability: DoS: Resource Consumption (CPU)",
+      "Other: Varies by Context"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-37052: insecure deserialization in platform for managing AI/ML applications and models allows code execution via a crafted pickled object in a model file",
+      "CVE-2024-37288: deserialization of untrusted YAML data in dashboard for data query and visualization of Elasticsearch data",
+      "CVE-2024-9314: PHP object injection in WordPress plugin for AI-based SEO"
+    ]
+  },
+  "CWE-90": {
+    "name": "LDAP Injection",
+    "detection": "taint",
+    "description": "User-controlled data is placed into an LDAP query without neutralization, letting an attacker modify the directory query.",
+    "taint_intuition": "Source = user input. Sink = the filter/DN argument of an LDAP search/bind call. Sanitizer = LDAP escaping.",
+    "typical_sink_names": [
+      "search",
+      "search_s",
+      "search_ext",
+      "search_ext_s",
+      "bind",
+      "bind_s",
+      "modify",
+      "modify_s",
+      "compare"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "escape_filter_chars",
+      "escape_dn_chars"
+    ],
+    "remediation": "Escape LDAP special characters (escape_filter_chars/escape_dn_chars); use allow-lists for DN components.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/90.html"
+    ],
+    "mitre_name": "Improper Neutralization of Special Elements used in an LDAP Query ('LDAP Injection')",
+    "mitre_description": "The product constructs all or part of an LDAP query using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements that could modify the intended LDAP query when it is sent to a downstream component.",
+    "mitre_mitigations": [
+      "Assume all input is malicious. Use an \"accept known good\" input validation strategy, i.e., use a list of acceptable inputs that strictly conform to specifications. Reject any input that does not strictly conform to specifications, or transform it into something that does. \n                   When performing input validation, consider all potentially relevant properties, including length, type of input, the full range of acceptable values, missing or extra inputs, syntax, consistency across related fields, and conformance to business rules. As an example of business rule logic, \"boat\" may be syntactically valid because it only contains alphanumeric characters, but it is not valid if the input is only expected to contain colors such as \"red\" or \"blue.\" \n                   Do not rely exclusively on looking for malicious or malformed inputs.  This is likely to miss at least one undesirable input, especially if the code's environment changes. This can give attackers enough room to bypass the intended validation. However, denylists can be useful for detecting potential attacks or determining which inputs are so malformed that they should be rejected outright."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-90', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "search",
+        "search_s",
+        "search_ext",
+        "search_ext_s",
+        "bind",
+        "bind_s",
+        "modify",
+        "modify_s",
+        "compare"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "escape_filter_chars",
+        "escape_dn_chars"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a LDAP Injection sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Confidentiality, Integrity, Availability: Execute Unauthorized Code or Commands, Read Application Data, Modify Application Data"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2021-41232: Chain: authentication routine in Go-based agile development product does not escape user name (CWE-116), allowing LDAP injection (CWE-90)",
+      "CVE-2005-2301: Server does not properly escape LDAP queries, which allows remote attackers to cause a DoS and possibly conduct an LDAP injection attack."
+    ]
+  },
+  "CWE-94": {
+    "name": "Code Injection",
+    "detection": "taint",
+    "description": "User-controlled data is interpreted as code (eval/exec/compile), letting an attacker run arbitrary Python.",
+    "taint_intuition": "Source = user input. Sink = the code/source argument of a dynamic-execution call. Sanitizer = none reliable; avoid dynamic exec.",
+    "typical_sink_names": [
+      "eval",
+      "exec",
+      "compile",
+      "execfile",
+      "eval_expr"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "literal_eval"
+    ],
+    "remediation": "Never pass untrusted input to eval/exec/compile; use ast.literal_eval or explicit parsers.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/94.html"
+    ],
+    "mitre_name": "Improper Control of Generation of Code ('Code Injection')",
+    "mitre_description": "The product constructs all or part of a code segment using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements that could modify the syntax or behavior of the intended code segment.",
+    "mitre_mitigations": [
+      "Refactor your program so that you do not have to dynamically generate code.",
+      "Run your code in a \"jail\" or similar sandbox environment that enforces strict boundaries between the process and the operating system. This may effectively restrict which code can be executed by your product. \n                   Examples include the Unix chroot jail and AppArmor. In general, managed code may provide some protection. \n                   This may not be a feasible solution, and it only limits the impact to the operating system; the rest of your application may still be subject to compromise. \n                   Be careful to avoid CWE-243 and other weaknesses related to jails.",
+      "Assume all input is malicious. Use an \"accept known good\" input validation strategy, i.e., use a list of acceptable inputs that strictly conform to specifications. Reject any input that does not strictly conform to specifications, or transform it into something that does. \n                   When performing input validation, consider all potentially relevant properties, including length, type of input, the full range of acceptable values, missing or extra inputs, syntax, consistency across related fields, and conformance to business rules. As an example of business rule logic, \"boat\" may be syntactically valid because it only contains alphanumeric characters, but it is not valid if the input is only expected to contain colors such as \"red\" or \"blue.\" \n                   Do not rely exclusively on looking for malicious or malformed inputs.  This is likely to miss at least one undesirable input, especially if the code's environment changes. This can give attackers enough room to bypass the intended validation. However, denylists can be useful for detecting potential attacks or determining which inputs are so malformed that they should be rejected outright. \n                   To reduce the likelihood of code injection, use stringent allowlists that limit which constructs are allowed. If you are dynamically constructing code that invokes a function, then verifying that the input is alphanumeric might be insufficient. An attacker might still be able to reference a dangerous function that you did not intend to allow, such as system(), exec(), or exit()."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-94', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "eval",
+        "exec",
+        "compile",
+        "execfile",
+        "eval_expr"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "literal_eval"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Code Injection sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Access Control: Bypass Protection Mechanism",
+      "Access Control: Gain Privileges or Assume Identity",
+      "Integrity, Confidentiality, Availability: Execute Unauthorized Code or Commands",
+      "Non-Repudiation: Hide Activities"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2023-29374: Math component in an LLM framework translates user input into a Python\n\t\t\t   expression that is input into the Python exec() method, allowing code\n\t\t\t   execution - one variant of a \"prompt injection\" attack.",
+      "CVE-2024-5565: Python-based library uses an LLM prompt containing user input to\n\t\t\t   dynamically generate code that is then fed as input into the Python\n\t\t\t   exec() method, allowing code execution - one variant of a \"prompt\n\t\t\t   injection\" attack.",
+      "CVE-2024-4181: Framework for LLM applications allows eval injection via a crafted response from a hosting provider."
+    ]
+  },
+  "CWE-611": {
+    "name": "XML External Entity (XXE)",
+    "detection": "taint",
+    "description": "An XML parser processes external entity references from untrusted XML, enabling file disclosure or SSRF.",
+    "taint_intuition": "Source = user-supplied XML. Sink = the data argument of an XML parse call configured to resolve entities. Sanitizer = disabling entity resolution / defusedxml.",
+    "typical_sink_names": [
+      "parse",
+      "fromstring",
+      "XML",
+      "parseString",
+      "iterparse",
+      "feed"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param",
+      "get_data"
+    ],
+    "typical_sanitizer_names": [
+      "defuse_stdlib"
+    ],
+    "remediation": "Use defusedxml or disable DTD/external entity resolution in the parser.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/611.html"
+    ],
+    "mitre_name": "Improper Restriction of XML External Entity Reference",
+    "mitre_description": "The product processes an XML document that can contain XML entities with URIs that resolve to documents outside of the intended sphere of control, causing the product to embed incorrect documents into its output.",
+    "mitre_mitigations": [
+      "Many XML parsers and validators can be configured to disable external entity expansion."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-611', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "parse",
+        "fromstring",
+        "XML",
+        "parseString",
+        "iterparse",
+        "feed"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param",
+        "get_data"
+      ],
+      "candidate_sanitizer_names": [
+        "defuse_stdlib"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a XML External Entity (XXE) sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Confidentiality: Read Application Data, Read Files or Directories",
+      "Integrity: Bypass Protection Mechanism",
+      "Availability: DoS: Resource Consumption (CPU), DoS: Resource Consumption (Memory)"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2022-42745: Recruiter software allows reading arbitrary files using XXE",
+      "CVE-2005-1306: A browser control can allow remote attackers to determine the existence of files via Javascript containing XML script.",
+      "CVE-2012-5656: XXE during SVG image conversion"
+    ]
+  },
+  "CWE-643": {
+    "name": "XPath Injection",
+    "detection": "taint",
+    "description": "User-controlled data is placed into an XPath expression without neutralization, letting an attacker alter the query.",
+    "taint_intuition": "Source = user input. Sink = the expression argument of an XPath evaluation call. Sanitizer = parameterized XPath.",
+    "typical_sink_names": [
+      "xpath",
+      "evaluate",
+      "find",
+      "findall",
+      "iterfind"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [],
+    "remediation": "Use parameterized/precompiled XPath; validate input against an allow-list.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/643.html"
+    ],
+    "mitre_name": "Improper Neutralization of Data within XPath Expressions ('XPath Injection')",
+    "mitre_description": "The product uses external input to dynamically construct an XPath expression used to retrieve data from an XML database, but it does not neutralize or incorrectly neutralizes that input. This allows an attacker to control the structure of the query.",
+    "mitre_extended_description": "The net effect is that the attacker will have control over the information selected from the XML database and may use that ability to control application flow, modify logic, retrieve unauthorized data, or bypass important checks (e.g. authentication).",
+    "mitre_mitigations": [
+      "Use parameterized XPath queries (e.g. using XQuery). This will help ensure separation between data plane and control plane.",
+      "Properly validate user input. Reject data where appropriate, filter where appropriate and escape where appropriate. Make sure input that will be used in XPath queries is safe in that context."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-643', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "xpath",
+        "evaluate",
+        "find",
+        "findall",
+        "iterfind"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [],
+      "interpretation": "A path finding proves user-controlled data flows to a XPath Injection sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite."
+    },
+    "mitre_consequences": [
+      "Access Control: Bypass Protection Mechanism",
+      "Confidentiality: Read Application Data"
+    ]
+  },
+  "CWE-601": {
+    "name": "Open Redirect",
+    "detection": "taint",
+    "description": "User-controlled data is used as a redirect target, letting an attacker send victims to a malicious site.",
+    "taint_intuition": "Source = user input. Sink = the URL/location argument of a redirect call. Sanitizer = allow-list of permitted hosts.",
+    "typical_sink_names": [
+      "redirect",
+      "url_for",
+      "Location",
+      "HttpResponseRedirect"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param",
+      "next"
+    ],
+    "typical_sanitizer_names": [
+      "is_safe_url",
+      "url_has_allowed_host_and_scheme"
+    ],
+    "remediation": "Validate redirect targets against an allow-list of hosts/paths.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/601.html"
+    ],
+    "mitre_name": "URL Redirection to Untrusted Site ('Open Redirect')",
+    "mitre_description": "The web application accepts a user-controlled input that specifies a link to an external site, and uses that link in a redirect.",
+    "mitre_mitigations": [
+      "Assume all input is malicious. Use an \"accept known good\" input validation strategy, i.e., use a list of acceptable inputs that strictly conform to specifications. Reject any input that does not strictly conform to specifications, or transform it into something that does. \n                   When performing input validation, consider all potentially relevant properties, including length, type of input, the full range of acceptable values, missing or extra inputs, syntax, consistency across related fields, and conformance to business rules. As an example of business rule logic, \"boat\" may be syntactically valid because it only contains alphanumeric characters, but it is not valid if the input is only expected to contain colors such as \"red\" or \"blue.\" \n                   Do not rely exclusively on looking for malicious or malformed inputs.  This is likely to miss at least one undesirable input, especially if the code's environment changes. This can give attackers enough room to bypass the intended validation. However, denylists can be useful for detecting potential attacks or determining which inputs are so malformed that they should be rejected outright. \n                   Use a list of approved URLs or domains to be used for redirection.",
+      "Use an intermediate disclaimer page that provides the user with a clear warning that they are leaving the current site. Implement a long timeout before the redirect occurs, or force the user to click on the link. Be careful to avoid XSS problems (CWE-79) when generating the disclaimer page.",
+      "When the set of acceptable objects, such as filenames or URLs, is limited or known, create a mapping from a set of fixed input values (such as numeric IDs) to the actual filenames or URLs, and reject all other inputs. \n                   For example, ID 1 could map to \"/login.asp\" and ID 2 could map to \"http://www.example.com/\". Features such as the ESAPI AccessReferenceMap [REF-45] provide this capability."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-601', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "redirect",
+        "url_for",
+        "Location",
+        "HttpResponseRedirect"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param",
+        "next"
+      ],
+      "candidate_sanitizer_names": [
+        "is_safe_url",
+        "url_has_allowed_host_and_scheme"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Open Redirect sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite.",
+      "false_positive_notes": "redirect() is normal; the issue is only when the target is user-controlled and not allow-listed."
+    },
+    "mitre_consequences": [
+      "Access Control: Bypass Protection Mechanism, Gain Privileges or Assume Identity",
+      "Access Control, Confidentiality, Other: Bypass Protection Mechanism, Gain Privileges or Assume Identity, Other"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2005-4206: URL parameter loads the URL into a frame and causes it to appear to be part of a valid page.",
+      "CVE-2008-2951: An open redirect vulnerability in the search script in the software allows remote attackers to redirect users to arbitrary web sites and conduct phishing attacks via a URL as a parameter to the proper function.",
+      "CVE-2008-2052: Open redirect vulnerability in the software allows remote attackers to redirect users to arbitrary web sites and conduct phishing attacks via a URL in the proper parameter."
+    ]
+  },
+  "CWE-918": {
+    "name": "Server-Side Request Forgery (SSRF)",
+    "detection": "taint",
+    "description": "User-controlled data is used as the target of a server-side HTTP request, letting an attacker reach internal services.",
+    "taint_intuition": "Source = user input. Sink = the URL argument of an outbound HTTP/fetch call. Sanitizer = allow-list of permitted destinations.",
+    "typical_sink_names": [
+      "get",
+      "post",
+      "put",
+      "delete",
+      "head",
+      "request",
+      "urlopen",
+      "fetch",
+      "send"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param",
+      "url"
+    ],
+    "typical_sanitizer_names": [
+      "is_allowed_url"
+    ],
+    "remediation": "Validate the destination against an allow-list; block internal IP ranges and redirects.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/918.html"
+    ],
+    "mitre_name": "Server-Side Request Forgery (SSRF)",
+    "mitre_description": "The web server receives a URL or similar request from an upstream component and retrieves the contents of this URL, but it does not sufficiently ensure that the request is being sent to the expected destination.",
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-918', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "get",
+        "post",
+        "put",
+        "delete",
+        "head",
+        "request",
+        "urlopen",
+        "fetch",
+        "send"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param",
+        "url"
+      ],
+      "candidate_sanitizer_names": [
+        "is_allowed_url"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Server-Side Request Forgery (SSRF) sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite.",
+      "false_positive_notes": "Outbound HTTP is normal; the issue is only when the destination URL is user-controlled."
+    },
+    "mitre_consequences": [
+      "Confidentiality: Read Application Data",
+      "Integrity: Execute Unauthorized Code or Commands",
+      "Access Control: Bypass Protection Mechanism"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2024-3095: SSRF in LLM application development framework because the URL retriever allows connections to local addresses using a crafted Location header",
+      "CVE-2023-32786: Chain: LLM integration framework has prompt injection\n\t     (CWE-1427) that allows an attacker to force the service to retrieve\n\t     data from an arbitrary URL, essentially providing SSRF (CWE-918) and\n\t     potentially injecting content into downstream tasks.",
+      "CVE-2021-26855: Server Side Request Forgery (SSRF) in mail server, as exploited in the wild per CISA KEV."
+    ]
+  },
+  "CWE-117": {
+    "name": "Improper Output Neutralization for Logs",
+    "detection": "taint",
+    "description": "User-controlled data is written to logs without neutralization, enabling log forging/injection.",
+    "taint_intuition": "Source = user input. Sink = the message argument of a logging call. Sanitizer = encoding/stripping newlines.",
+    "typical_sink_names": [
+      "info",
+      "debug",
+      "warning",
+      "warn",
+      "error",
+      "critical",
+      "exception",
+      "log"
+    ],
+    "typical_source_names": [
+      "get_input",
+      "read_input",
+      "get_param"
+    ],
+    "typical_sanitizer_names": [
+      "sanitize_log"
+    ],
+    "remediation": "Strip/encode CR/LF and control chars before logging untrusted data; use structured logging.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/117.html"
+    ],
+    "mitre_name": "Improper Output Neutralization for Logs",
+    "mitre_description": "The product constructs a log message from external input, but it does not neutralize or incorrectly neutralizes special elements when the message is written to a log file.",
+    "mitre_mitigations": [
+      "Assume all input is malicious. Use an \"accept known good\" input validation strategy, i.e., use a list of acceptable inputs that strictly conform to specifications. Reject any input that does not strictly conform to specifications, or transform it into something that does. \n                   When performing input validation, consider all potentially relevant properties, including length, type of input, the full range of acceptable values, missing or extra inputs, syntax, consistency across related fields, and conformance to business rules. As an example of business rule logic, \"boat\" may be syntactically valid because it only contains alphanumeric characters, but it is not valid if the input is only expected to contain colors such as \"red\" or \"blue.\" \n                   Do not rely exclusively on looking for malicious or malformed inputs.  This is likely to miss at least one undesirable input, especially if the code's environment changes. This can give attackers enough room to bypass the intended validation. However, denylists can be useful for detecting potential attacks or determining which inputs are so malformed that they should be rejected outright.",
+      "Use and specify an output encoding that can be handled by the downstream component that is reading the output. Common encodings include ISO-8859-1, UTF-7, and UTF-8. When an encoding is not specified, a downstream component may choose a different encoding, either by assuming a default encoding or automatically inferring which encoding is being used, which can be erroneous. When the encodings are inconsistent, the downstream component might treat some character or byte sequences as special, even if they are not special in the original encoding. Attackers might then be able to exploit this discrepancy and conduct injection attacks; they even might be able to bypass protection mechanisms that assume the original encoding is also being used by the downstream component.",
+      "Inputs should be decoded and canonicalized to the application's current internal representation before being validated (CWE-180). Make sure that the application does not decode the same input twice (CWE-174). Such errors could be used to bypass allowlist validation schemes by introducing dangerous inputs after they have been checked."
+    ],
+    "actions": {
+      "tool": "run_taint_query",
+      "how_to_verify": "Call run_taint_query(cwe='CWE-117', sink_names=<candidates below + any real wrapper names you saw in the code>). Optionally pass source_names and sanitizer_names. RemoteFlowSource is always a source.",
+      "candidate_sink_names": [
+        "info",
+        "debug",
+        "warning",
+        "warn",
+        "error",
+        "critical",
+        "exception",
+        "log"
+      ],
+      "candidate_source_names": [
+        "get_input",
+        "read_input",
+        "get_param"
+      ],
+      "candidate_sanitizer_names": [
+        "sanitize_log"
+      ],
+      "interpretation": "A path finding proves user-controlled data flows to a Improper Output Neutralization for Logs sink. The CWE is read from the query @tags (deterministic), and the flow_path (source->sink, file:line) is the evidence to cite.",
+      "false_positive_notes": "Logging calls are extremely common; only a flow from untrusted input to the log message is a real issue."
+    },
+    "mitre_consequences": [
+      "Integrity, Confidentiality, Availability, Non-Repudiation: Modify Application Data, Hide Activities, Execute Unauthorized Code or Commands"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2006-4624: Chain: inject fake log entries with fake timestamps using CRLF injection"
+    ]
+  },
+  "CWE-328": {
+    "name": "Use of Weak Hash",
+    "detection": "api_misuse",
+    "description": "A cryptographically weak hash (e.g. MD5, SHA-1) is used where collision/preimage resistance is required.",
+    "detection_intuition": "Flag calls to weak hash constructors by name, or hashlib.new() with a weak algorithm string argument.",
+    "weak_call_names": [
+      "md5",
+      "sha1",
+      "md4",
+      "md2",
+      "new"
+    ],
+    "bad_constants": [
+      "md5",
+      "sha1",
+      "md4",
+      "md2"
+    ],
+    "remediation": "Use SHA-256 or stronger; for passwords use a KDF (bcrypt, scrypt, argon2, PBKDF2).",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/328.html"
+    ],
+    "mitre_name": "Use of Weak Hash",
+    "mitre_description": "The product uses an algorithm that produces a digest (output value) that does not meet security expectations for a hash function that allows an adversary to reasonably determine the original input (preimage attack), find another input that can produce the same hash (2nd preimage attack), or find multiple inputs that evaluate to the same hash (birthday attack).",
+    "mitre_extended_description": "A hash function is defined as an algorithm that maps arbitrarily sized data into a fixed-sized digest (output) such that the following properties hold: \n\t    \n\t      The algorithm is not invertible (also called \"one-way\" or \"not reversible\") \n\t      The algorithm is deterministic; the same input produces the same digest every time \n\t    \n\t    \n\t     Building on this definition, a cryptographic hash function must also ensure that a malicious actor cannot leverage the hash function to have a reasonable chance of success at determining any of the following: \n\t    \n\t      the original input (preimage attack), given only the digest \n\t      another input that can produce the same digest (2nd preimage attack), given the original input \n\t      a set of two or more inputs that evaluate to the same digest (birthday attack), given the actor can arbitrarily choose the inputs to be hashed and can do so a reasonable amount of times \n\t    \n\t    What is regarded as \"reasonable\" varies by context and threat model, but in general, \"reasonable\" could cover any attack that is more efficient than brute force (i.e., on average, attempting half of all possible combinations). Note that some attacks might be more efficient than brute force but are still not regarded as achievable in the real world. \n\t    Any algorithm that does not meet the above conditions will generally be considered weak for general use in hashing. \n\t    In addition to algorithmic weaknesses, a hash function can be made weak by using the hash in a security context that breaks its security guarantees. For example, using a hash function without a salt for storing passwords (that are sufficiently short) could enable an adversary to create a \"rainbow table\" [REF-637] to recover the password under certain conditions; this attack works against such hash functions as MD5, SHA-1, and SHA-2.",
+    "mitre_mitigations": [
+      "Use an adaptive hash function that can be configured to change the amount of computational effort needed to compute the hash, such as the number of iterations (\"stretching\") or the amount of memory required. Some hash functions perform salting automatically. These functions can significantly increase the overhead for a brute force attack compared to intentionally-fast functions such as MD5. For example, rainbow table attacks can become infeasible due to the high computing overhead. Finally, since computing power gets faster and cheaper over time, the technique can be reconfigured to increase the workload without forcing an entire replacement of the algorithm in use. \n                   Some hash functions that have one or more of these desired properties include bcrypt [REF-291], scrypt [REF-292], and PBKDF2 [REF-293]. While there is active debate about which of these is the most effective, they are all stronger than using salts with hash functions with very little computing overhead. \n                   Note that using these functions can have an impact on performance, so they require special consideration to avoid denial-of-service attacks. However, their configurability provides finer control over how much CPU and memory is used, so it could be adjusted to suit the environment's needs."
+    ],
+    "actions": {
+      "tool": "check_weak_hash",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_hash(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-328', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
+      "candidate_weak_call_names": [
+        "md5",
+        "sha1",
+        "md4",
+        "md2",
+        "new"
+      ],
+      "candidate_bad_constants": [
+        "md5",
+        "sha1",
+        "md4",
+        "md2"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call to a weak/insecure API or one passing a weak constant. Confirm the surrounding context with read_file_snippet before reporting."
+    },
+    "mitre_consequences": [
+      "Access Control: Bypass Protection Mechanism"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2022-30320: Programmable Logic Controller (PLC) uses a protocol with a cryptographically insecure hashing algorithm for passwords.",
+      "CVE-2005-4900: SHA-1 algorithm is not collision-resistant.",
+      "CVE-2020-25685: DNS product uses a weak hash (CRC32 or SHA-1) of the query name, allowing attacker to forge responses by computing domain names with the same hash."
+    ]
+  },
+  "CWE-327": {
+    "name": "Use of a Broken or Risky Cryptographic Algorithm",
+    "detection": "api_misuse",
+    "description": "A broken or risky cipher (e.g. DES, RC4, ECB mode) is used to protect sensitive data.",
+    "detection_intuition": "Flag calls to weak cipher constructors by name, or constructors taking a weak algorithm/mode string.",
+    "weak_call_names": [
+      "DES",
+      "DES3",
+      "ARC4",
+      "RC4",
+      "RC2",
+      "Blowfish",
+      "new"
+    ],
+    "bad_constants": [
+      "des",
+      "3des",
+      "rc4",
+      "rc2",
+      "blowfish",
+      "ecb",
+      "md5",
+      "sha1"
+    ],
+    "remediation": "Use AES-GCM or ChaCha20-Poly1305; never ECB; prefer high-level libraries (cryptography Fernet).",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/327.html"
+    ],
+    "mitre_name": "Use of a Broken or Risky Cryptographic Algorithm",
+    "mitre_description": "The product uses a broken or risky cryptographic algorithm or protocol.",
+    "mitre_extended_description": "Cryptographic algorithms are the methods by which data is scrambled to prevent observation or influence by unauthorized actors. Insecure cryptography can be exploited to expose sensitive information, modify data in unexpected ways, spoof identities of other users or devices, or other impacts. \n            It is very difficult to produce a secure algorithm, and even high-profile algorithms by accomplished cryptographic experts have been broken. Well-known techniques exist to break or weaken various kinds of cryptography. Accordingly, there are a small number of well-understood and heavily studied algorithms that should be used by most products. Using a non-standard or known-insecure algorithm is dangerous because a determined adversary may be able to break the algorithm and compromise whatever data has been protected. \n            Since the state of cryptography advances so rapidly, it is common for an algorithm to be considered \"unsafe\" even if it was once thought to be strong. This can happen when new attacks are discovered, or if computing power increases so much that the cryptographic algorithm no longer provides the amount of protection that was originally thought. \n\t    For a number of reasons, this weakness is even more challenging to manage with hardware deployment of cryptographic algorithms as opposed to software implementation. First, if a flaw is discovered with hardware-implemented cryptography, the flaw cannot be fixed in most cases without a recall of the product, because hardware is not easily replaceable like software. Second, because the hardware product is expected to work for years, the adversary's computing power will only increase over time.",
+    "mitre_mitigations": [
+      "When there is a need to store or transmit sensitive data, use strong, up-to-date cryptographic algorithms to encrypt that data. Select a well-vetted algorithm that is currently considered to be strong by experts in the field, and use well-tested implementations. As with all cryptographic mechanisms, the source code should be available for analysis. \n                   For example, US government systems require FIPS 140-2 certification [REF-1192]. \n                   Do not develop custom or private cryptographic algorithms. They will likely be exposed to attacks that are well-understood by cryptographers. Reverse engineering techniques are mature. If the algorithm can be compromised if attackers find out how it works, then it is especially weak. \n                   Periodically ensure that the cryptography has not become obsolete. Some older algorithms, once thought to require a billion years of computing time, can now be broken in days or hours. This includes MD4, MD5, SHA1, DES, and other algorithms that were once regarded as strong. [REF-267]",
+      "Ensure that the design allows one cryptographic algorithm to be replaced with another in the next generation or version. Where possible, use wrappers to make the interfaces uniform. This will make it easier to upgrade to stronger algorithms. With hardware, design the product at the Intellectual Property (IP) level so that one cryptographic algorithm can be replaced with another in the next generation of the hardware product.",
+      "Carefully manage and protect cryptographic keys (see CWE-320). If the keys can be guessed or stolen, then the strength of the cryptography itself is irrelevant."
+    ],
+    "actions": {
+      "tool": "check_broken_crypto",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_broken_crypto(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-327', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
+      "candidate_weak_call_names": [
+        "DES",
+        "DES3",
+        "ARC4",
+        "RC4",
+        "RC2",
+        "Blowfish",
+        "new"
+      ],
+      "candidate_bad_constants": [
+        "des",
+        "3des",
+        "rc4",
+        "rc2",
+        "blowfish",
+        "ecb",
+        "md5",
+        "sha1"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call to a weak/insecure API or one passing a weak constant. Confirm the surrounding context with read_file_snippet before reporting."
+    },
+    "mitre_consequences": [
+      "Confidentiality: Read Application Data",
+      "Integrity: Modify Application Data",
+      "Accountability, Non-Repudiation: Hide Activities"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2022-30273: SCADA-based protocol supports a legacy encryption mode that uses Tiny Encryption Algorithm (TEA) in ECB mode, which leaks patterns in messages and cannot protect integrity",
+      "CVE-2022-30320: Programmable Logic Controller (PLC) uses a protocol with a cryptographically insecure hashing algorithm for passwords.",
+      "CVE-2008-3775: Product uses \"ROT-25\" to obfuscate the password in the registry."
+    ]
+  },
+  "CWE-330": {
+    "name": "Use of Insufficiently Random Values",
+    "detection": "api_misuse",
+    "description": "A non-cryptographic PRNG (the random module) is used to generate security-sensitive values.",
+    "detection_intuition": "Flag calls to the standard random module functions when used for tokens/secrets.",
+    "weak_call_names": [
+      "random",
+      "randint",
+      "randrange",
+      "choice",
+      "choices",
+      "shuffle",
+      "uniform",
+      "getrandbits",
+      "seed",
+      "sample"
+    ],
+    "bad_constants": [],
+    "remediation": "Use the secrets module (or os.urandom) for security-sensitive randomness.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/330.html"
+    ],
+    "mitre_name": "Use of Insufficiently Random Values",
+    "mitre_description": "The product uses insufficiently random numbers or values in a security context that depends on unpredictable numbers.",
+    "mitre_mitigations": [
+      "Use a well-vetted algorithm that is currently considered to be strong by experts in the field, and select well-tested implementations with adequate length seeds. \n                   In general, if a pseudo-random number generator is not advertised as being cryptographically secure, then it is probably a statistical PRNG and should not be used in security-sensitive contexts. \n                   Pseudo-random number generators can produce predictable numbers if the generator is known and the seed can be guessed. A 256-bit seed is a good starting point for producing a \"random enough\" number.",
+      "Consider a PRNG that re-seeds itself as needed from high quality pseudo-random output sources, such as hardware devices.",
+      "Use automated static analysis tools that target this type of weakness. Many modern techniques use data flow analysis to minimize the number of false positives. This is not a perfect solution, since 100% accuracy and coverage are not feasible."
+    ],
+    "actions": {
+      "tool": "check_weak_random",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_random(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-330', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
+      "candidate_weak_call_names": [
+        "random",
+        "randint",
+        "randrange",
+        "choice",
+        "choices",
+        "shuffle",
+        "uniform",
+        "getrandbits",
+        "seed",
+        "sample"
+      ],
+      "candidate_bad_constants": [],
+      "interpretation": "Point detection (no data flow): a finding flags a call to a weak/insecure API or one passing a weak constant. Confirm the surrounding context with read_file_snippet before reporting.",
+      "false_positive_notes": "The random module is frequently used for non-security purposes; confirm the value is security-sensitive (token, key, password, nonce) before reporting."
+    },
+    "mitre_consequences": [
+      "Confidentiality, Other: Other",
+      "Access Control, Other: Bypass Protection Mechanism, Other",
+      "Access Control: Bypass Protection Mechanism, Gain Privileges or Assume Identity"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2021-3692: PHP framework uses mt_rand() function (Marsenne Twister) when generating tokens",
+      "CVE-2020-7010: Cloud application on Kubernetes generates passwords using a weak random number generator based on deployment time.",
+      "CVE-2009-3278: Crypto product uses rand() library function to generate a recovery key, making it easier to conduct brute force attacks."
+    ]
+  },
+  "CWE-916": {
+    "name": "Use of Password Hash With Insufficient Computational Effort",
+    "detection": "api_misuse",
+    "description": "Passwords are hashed with a fast/weak function (e.g. MD5/SHA-1, no salt/iterations) instead of a KDF.",
+    "detection_intuition": "Flag fast hash calls used for password storage; recommend a slow KDF.",
+    "weak_call_names": [
+      "md5",
+      "sha1",
+      "sha256",
+      "new"
+    ],
+    "bad_constants": [
+      "md5",
+      "sha1"
+    ],
+    "remediation": "Use bcrypt, scrypt, argon2, or PBKDF2 with a unique salt and high iteration count.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/916.html"
+    ],
+    "mitre_name": "Use of Password Hash With Insufficient Computational Effort",
+    "mitre_description": "The product generates a hash for a password, but it uses a scheme that does not provide a sufficient level of computational effort that would make password cracking attacks infeasible or expensive.",
+    "mitre_extended_description": "Many password storage mechanisms compute a hash and store the hash, instead of storing the original password in plaintext. In this design, authentication involves accepting an incoming password, computing its hash, and comparing it to the stored hash. \n             Many hash algorithms are designed to execute quickly with minimal overhead, even cryptographic hashes. However, this efficiency is a problem for password storage, because it can reduce an attacker's workload for brute-force password cracking. If an attacker can obtain the hashes through some other method (such as SQL injection on a database that stores hashes), then the attacker can store the hashes offline and use various techniques to crack the passwords by computing hashes efficiently. Without a built-in workload, modern attacks can compute large numbers of hashes, or even exhaust the entire space of all possible passwords, within a very short amount of time, using massively-parallel computing (such as cloud computing) and GPU, ASIC, or FPGA hardware. In such a scenario, an efficient hash algorithm helps the attacker. \n             There are several properties of a hash scheme that are relevant to its strength against an offline, massively-parallel attack: \n                \n                   The amount of CPU time required to compute the hash (\"stretching\") \n                   The amount of memory required to compute the hash (\"memory-hard\" operations) \n                   Including a random value, along with the password, as input to the hash computation (\"salting\") \n                   Given a hash, there is no known way of determining an input (e.g., a password) that produces this hash value, other than by guessing possible inputs (\"one-way\" hashing) \n                   Relative to the number of all possible hashes that can be generated by the scheme, there is a low likelihood of producing the same hash for multiple different inputs (\"collision resistance\") \n                \n             Note that the security requirements for the product may vary depending on the environment and the value of the passwords. Different schemes might not provide all of these properties, yet may still provide sufficient security for the environment. Conversely, a solution might be very strong in preserving one property, which still being very weak for an attack against another property, or it might not be able to significantly reduce the efficiency of a massively-parallel attack.",
+    "mitre_mitigations": [
+      "Use an adaptive hash function that can be configured to change the amount of computational effort needed to compute the hash, such as the number of iterations (\"stretching\") or the amount of memory required. Some hash functions perform salting automatically. These functions can significantly increase the overhead for a brute force attack compared to intentionally-fast functions such as MD5. For example, rainbow table attacks can become infeasible due to the high computing overhead. Finally, since computing power gets faster and cheaper over time, the technique can be reconfigured to increase the workload without forcing an entire replacement of the algorithm in use. \n                   Some hash functions that have one or more of these desired properties include bcrypt [REF-291], scrypt [REF-292], and PBKDF2 [REF-293]. While there is active debate about which of these is the most effective, they are all stronger than using salts with hash functions with very little computing overhead. \n                   Note that using these functions can have an impact on performance, so they require special consideration to avoid denial-of-service attacks. However, their configurability provides finer control over how much CPU and memory is used, so it could be adjusted to suit the environment's needs.",
+      "When using industry-approved techniques, use them correctly. Don't cut corners by skipping resource-intensive steps (CWE-325). These steps are often essential for preventing common attacks."
+    ],
+    "actions": {
+      "tool": "check_weak_password_hash",
+      "how_to_verify": "Try these zero-parameter checks FIRST (no names to guess): check_weak_password_hash(db_path). If none of them finds it and you suspect a custom/uncommon API not covered by them, fall back to run_api_misuse_query(cwe='CWE-916', weak_call_names=<candidates below>, bad_constants=<weak algorithm/mode strings>).",
+      "candidate_weak_call_names": [
+        "md5",
+        "sha1",
+        "sha256",
+        "new"
+      ],
+      "candidate_bad_constants": [
+        "md5",
+        "sha1"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call to a weak/insecure API or one passing a weak constant. Confirm the surrounding context with read_file_snippet before reporting.",
+      "false_positive_notes": "Hash calls are also used for checksums/caching; confirm the input is a password before reporting."
+    },
+    "mitre_consequences": [
+      "Access Control: Bypass Protection Mechanism, Gain Privileges or Assume Identity"
+    ],
+    "mitre_observed_examples": [
+      "CVE-2008-1526: Router does not use a salt with a hash, making it easier to crack passwords.",
+      "CVE-2006-1058: Router does not use a salt with a hash, making it easier to crack passwords.",
+      "CVE-2008-4905: Blogging software uses a hard-coded salt when calculating a password hash."
+    ]
+  },
+  "CWE-295": {
+    "name": "Improper Certificate Validation",
+    "detection": "insecure_config_flag",
+    "description": "Disabling SSL/TLS certificate validation in HTTP requests allows man-in-the-middle attacks.",
+    "remediation": "Always use verify=True (default) for requests.get/post/etc. Never disable certificate validation in production.",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/295.html"
+    ],
+    "actions": {
+      "tool": "check_insecure_verify_false",
+      "how_to_verify": "Call check_insecure_verify_false(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-295').",
+      "candidate_patterns": [
+        "requests.get(..., verify=False)",
+        "requests.post(..., verify=False)",
+        "ssl_context.check_hostname = False"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
+    }
+  },
+  "CWE-489": {
+    "name": "Active Debug Code",
+    "detection": "insecure_config_flag",
+    "description": "Enabling debug mode in production exposes sensitive information (stack traces, environment variables, config) that aids attackers.",
+    "remediation": "Always disable debug mode in production. Use debug=False or set environment-based configuration (DEBUG=false in production).",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/489.html"
+    ],
+    "actions": {
+      "tool": "check_insecure_debug_true",
+      "how_to_verify": "Call check_insecure_debug_true(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-489').",
+      "candidate_patterns": [
+        "Flask(..., debug=True)",
+        "app.run(debug=True)",
+        "DEBUG = True"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
+    }
+  },
+  "CWE-614": {
+    "name": "Sensitive Cookie in HTTPS Session Without 'Secure' Attribute",
+    "detection": "insecure_config_flag",
+    "description": "Cookies without secure/httponly flags or with samesite=None are vulnerable to interception, JavaScript access, or CSRF.",
+    "remediation": "Always set secure=True, httponly=True, samesite='Strict' or 'Lax' on cookies (especially session cookies).",
+    "references": [
+      "https://cwe.mitre.org/data/definitions/614.html"
+    ],
+    "actions": {
+      "tool": "check_insecure_cookie_flags",
+      "how_to_verify": "Call check_insecure_cookie_flags(db_path) to detect this insecure configuration flag. For custom module/parameter patterns, use run_insecure_config_flag_query(db_path, module, functions, param_name, insecure_value, cwe='CWE-614').",
+      "candidate_patterns": [
+        "response.set_cookie(..., secure=False)",
+        "response.set_cookie(..., httponly=False)",
+        "response.set_cookie(..., samesite='None')"
+      ],
+      "interpretation": "Point detection (no data flow): a finding flags a call configured with an insecure flag. Confirm the surrounding context with read_file_snippet before reporting; severity may depend on the deployment environment."
+    }
+  }
+}

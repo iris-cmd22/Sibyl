@@ -1,42 +1,123 @@
-# CodeQL Security Agent
+# Sibyl — CodeQL Security Agent
 
-Agente che usa un **modello Ollama locale** per analizzare la sicurezza di una
-repository, eseguendo query **CodeQL** esposte come **tool MCP**.
+Sibyl analizza la sicurezza di una repository facendo guidare l'analisi a un
+**modello Ollama locale**, che esegue query **CodeQL** esposte come **tool MCP**.
+
+È composto da **due programmi indipendenti** che girano in parallelo:
+
+- **Server MCP** (`python -m server`) — incapsula la CLI CodeQL ed espone 41 tool
+  (vedi §Tool MCP esposti). Su Windows/PowerShell ricorda di impostare
+  `$env:MCP_TRANSPORT = "sse"` prima di avviarlo per l'uso in rete/SSE (§Uso).
+- **Agente** (`python -m agent`) — client che connette l'LLM al server e orchestra
+  l'analisi fino al report.
 
 ## Architettura
 
+Tre processi che dialogano su `localhost` (nessuna porta esposta all'esterno):
+
 ```
-Ollama LLM  ──tool_calls──►  agent.py (host)  ──MCP/stdio──►  codeql_mcp_server.py  ──►  CodeQL CLI
-(qwen2.5-coder:14b)          loop tool-calling                tool MCP                    + query locali
+                    ┌─────────────────────────────────────────────┐
+                    │  Stessa macchina (Ubuntu o Windows)          │
+   python -m agent ─┤                                              │
+   (client)         │   Agente ──HTTP:11434──►  Ollama (qwen)      │
+                    │      │                                       │
+                    │      └────SSE:8000────►  Server MCP ──► CodeQL CLI
+                    │                          (python -m server)  │
+                    └─────────────────────────────────────────────┘
 ```
 
-- **`codeql_mcp_server.py`** — server MCP (FastMCP) che incapsula la CLI CodeQL.
-- **`agent.py`** — host: avvia il server come subprocess stdio, espone i tool al
-  modello Ollama, gira il loop chat→tool→risultato finché il modello scrive il report.
-- **`config.py`** — modello, percorsi CodeQL, suite di default, timeout.
-- **`query_templates/`** — template `.ql.tmpl` parametrizzati (taint, api-misuse, insecure-config-flag).
-- **`knowledge/`** — `cwe_wiki.json` (CWE verificabili con azioni) + `cwe_catalog.json` (969 CWE, lookup).
+- L'agente parla con l'**LLM** via HTTP (function calling) e con il **server** via
+  SSE (tool MCP). Il modello decide *cosa* fare, l'agente fa *eseguire* al server.
+- Dettagli interni: `documentazione/agent.md` (agente) e
+  `documentazione/Server_MCP_Architettura.md` (server).
+
+> ⚠️ Il server legge i file della repo dal **proprio filesystem**: la repository da
+> analizzare deve trovarsi **sulla macchina dove gira il server** (vedi §Uso).
+
+## Componenti
+
+| Cartella | Cosa contiene |
+|---|---|
+| `server/` | Server MCP autocontenuto: `core/`, `tools/`, `registry/`, `knowledge/`, `transport/`, `config.py` |
+| `agent/` | Agente modulare: `orchestrator.py`, `prompts.py`/`prompts_local.py`/`prompt_router.py`, `worklist.py`, `progress.py`, `clients/`, `robustness/` (incl. `degenerate.py`, `readargs.py`), `report.py`, `config.py` |
+| `query_templates/`, `generated_queries/` | template `.ql.tmpl` e query generate (dentro `server/`) |
+
+## Pipeline di analisi
+
+L'agente esegue l'analisi in tre stadi (`agent/orchestrator.py`):
+
+1. **Gathering** (deterministico, nessuna chiamata LLM) — `_gather_evidence` costruisce
+   il database CodeQL (`create_codeql_database`) e chiama in sequenza `find_all_flows` +
+   gli 11 tool categorizzati (vedi §Tool MCP esposti), popolando una work-list di
+   flow/operazioni candidate. Nessun giudizio richiesto, quindi nessun modello coinvolto.
+2. **Detection** (LLM) — legge il codice reale (`read_file_snippet`, `list_python_files`)
+   e **arricchisce** l'evidenza già raccolta (nomi/valori/algoritmi reali, giudizio di
+   rilevanza). Non scopre segnali da sola e non assegna CWE.
+3. **Validation** (LLM) — esegue le query mirate (check zero-parametro in primis,
+   `run_taint_query`/`run_api_misuse_query`/`run_insecure_config_flag_query` come
+   fallback), associa un CWE reale a ogni finding e scrive il report finale.
+
+Controlli anti-allucinazione integrati: Validation non può chiudere il report finché non
+ha verificato con un tool reale un numero di elementi coerente con l'evidenza raccolta, e
+ogni CWE citato nel report deve essere confermato da un tool effettivamente chiamato in
+quello stadio.
 
 ## Tool MCP esposti
 
 **Esplorazione / DB**
 - `list_python_files` — enumera i `.py` della repo
-- `read_file_snippet` — legge righe sorgente attorno a un finding
-- `create_codeql_database` — costruisce il DB CodeQL
+- `read_file_snippet(repo_path, file, start_line, end_line)` — legge righe sorgente
+  attorno a un finding (il path va passato come `repo_path` + `file` relativo, non più
+  un path assoluto)
+- `create_codeql_database` — costruisce il DB CodeQL (chiamato deterministicamente dal
+  Gathering, non più un tool dell'LLM in Detection)
 - `analyze_database` — esegue la suite standard `python-security-extended`
-- `run_custom_query` — esegue un `.ql` arbitrario
+- `find_confirmed_vulnerabilities(db_path, max_findings=200)` — esegue l'intera suite
+  ufficiale e restituisce risultati deduplicati già taggati con CWE certificato.
+  Registrato ma **non cablato** in nessuna fase della pipeline automatica oggi
+  (né Gathering né Detection/Validation): disponibile per uso manuale o come base per
+  un futuro step di "Evaluation" esterno alla pipeline.
+- `run_custom_query(db_path, query_path)` — esegue per NOME un `.ql` gia' registrato
+  dentro `CUSTOM_QUERY_DIR` (mai un path libero: solo cosi' si estendono le query
+  custom, aggiungendo un nuovo file in quella cartella)
 
 **Knowledge base**
 - `list_cwes` — elenca i CWE rilevabili (con detection kind e tool giusto)
 - `cwe_knowledge(cwe)` — scheda completa di un CWE (descrizione MITRE + azioni operative)
 
-**Verifica vulnerabilità** — tre famiglie name-based / template-based:
+**Inventario CWE-agnostico** (fase Gathering, deterministica) — sostituiscono l'unico
+tool monolitico `find_sensitive_operations` (rimosso): un tool per categoria, ciascuno
+`(db_path, repo_path="", max_ops=200)`, nessuno assegna un CWE.
 
-| Detection | Tool | CWE tipici |
-|-----------|------|------------|
-| **taint** (dataflow source→sink) | `run_taint_query` | 89, 78, 22, 79, 502, 90, 94, 611, 643, 601, 918, 117 |
-| **api_misuse** (point detection) | `run_api_misuse_query` | 327, 328, 330, 916 |
-| **insecure_config_flag** (point detection) | `check_insecure_*` + `run_insecure_config_flag_query` | 295, 78, 79, 489, 327, 330, 614 |
+| Tool | Kind | Template |
+|---|---|---|
+| `find_command_execution` | command-exec | `command_exec.ql.tmpl` |
+| `find_code_execution` | code-exec | `code_exec.ql.tmpl` |
+| `find_sql_execution` | sql-exec | `sql_exec.ql.tmpl` |
+| `find_filesystem_access` | filesystem | `filesystem_access.ql.tmpl` |
+| `find_decoding_operations` | decoding | `decoding_ops.ql.tmpl` |
+| `find_crypto_operations` | crypto | `crypto_ops.ql.tmpl` |
+| `find_weak_randomness` | weak-randomness | `weak_randomness.ql.tmpl` |
+| `find_insecure_config_flags` | config-flag | `insecure_config_flags.ql.tmpl` |
+
+Più 3 tool "non-CWE" basati su query CodeQL ufficiali standard (segnali strutturali da
+interpretare, non vulnerabilità già classificate):
+
+| Tool | Segnale | Query ufficiali usate |
+|---|---|---|
+| `find_exception_handling_issues` | except troppo ampio/vuoto | `Exceptions/EmptyExcept.ql`, `Exceptions/CatchingBaseException.ql`, `Statements/UnusedExceptionObject.ql` |
+| `find_broken_sanitizer_patterns` | regex-sanitizer rotta | query in `Expressions/Regex/` |
+| `find_resource_handling_issues` | risorse non chiuse / manca `with` | `Resources/FileNotAlwaysClosed.ql`, `Statements/ShouldUseWithStatement.ql` |
+
+**Verifica vulnerabilità** — la wiki CWE (`cwe_knowledge`) raccomanda sempre prima il
+check dedicato a zero parametri; i tool generici `run_taint_query`/`run_api_misuse_query`
+restano disponibili come fallback per wrapper/API custom non coperte dai check dedicati:
+
+| Detection | Tool primario | Fallback | CWE tipici |
+|-----------|------|------|------------|
+| **taint** (dataflow source→sink) | `check_sql_injection`, `check_os_command_injection`, `check_path_traversal`, `check_deserialization`, `check_xss` | `run_taint_query` | 89, 78, 22, 79, 502, 90, 94, 611, 643, 601, 918, 117 |
+| **api_misuse** (point detection) | `check_weak_hash`, `check_broken_crypto`, `check_weak_random`, `check_weak_password_hash` | `run_api_misuse_query` | 327, 328, 330, 916 |
+| **insecure_config_flag** (point detection) | `check_insecure_*` | `run_insecure_config_flag_query` | 295, 78, 79, 489, 327, 330, 614 |
 
 ### Insecure configuration flags
 
@@ -56,92 +137,257 @@ dedicati + un tool generico parametrizzato:
 Per pattern non coperti: `run_insecure_config_flag_query(db_path, module, functions,
 param_name, insecure_value, cwe)`.
 
-## Prerequisiti
+## Prerequisiti (entrambi gli OS)
 
-- **CodeQL CLI** (≥ 2.25) su PATH (oppure imposta `CODEQL_BIN`)
+- **Python 3.10+** (consigliato 3.12/3.13; con Python molto recente alcune wheel
+  potrebbero mancare — in tal caso usa un venv 3.12/3.13).
+- **CodeQL CLI** (≥ 2.25) — su PATH oppure imposta `CODEQL_BIN` col percorso completo.
 - Un checkout di **[vscode-codeql-starter](https://github.com/github/vscode-codeql-starter)**
-  (le query si usano via `--search-path`, **niente download di pack**)
-- **Ollama** in esecuzione con il modello desiderato (default `qwen2.5-coder:14b`)
+  (le query si usano via `--search-path`, **niente download di pack**):
+  ```
+  git clone --depth 1 --recursive --shallow-submodules \
+    https://github.com/github/vscode-codeql-starter.git
+  ```
+- **Ollama** in esecuzione con il modello desiderato (`ollama pull qwen2.5-coder:3b`,
+  o la taglia che preferisci).
 
 ## Setup
 
-```powershell
-# 1. dipendenze (uv consigliato)
-uv venv
-uv pip install -r requirements.txt
-#   oppure: pip install -r requirements.txt
+Un solo file **`.env`** nella root serve sia al server sia all'agente (entrambi lo
+caricano). Le tre variabili CodeQL sono **obbligatorie**. Parti da `.env.example`
+(`cp .env.example .env`, su Windows `copy .env.example .env`) e adatta i percorsi.
 
-# 2. configura i percorsi locali in un file .env (NON committato)
+### Ubuntu / Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt        # mcp + ollama + python-dotenv
+pip install pytest                      # solo se vuoi lanciare i test
+
+cat > .env <<'EOF'
+CODEQL_BIN=/home/utente/codeql-tools/codeql/codeql
+CODEQL_SEARCH_PATH=/home/utente/codeql-tools/vscode-codeql-starter/ql
+CODEQL_SUITE=/home/utente/codeql-tools/vscode-codeql-starter/ql/python/ql/src/codeql-suites/python-security-extended.qls
+CUSTOM_QUERY_DIR=/home/utente/codeql-tools/vscode-codeql-starter/codeql-custom-queries-python
+AGENT_MODEL=qwen2.5-coder:3b
+EOF
 ```
 
-Crea un file **`.env`** nella root del progetto con i percorsi della **tua**
-copia di `vscode-codeql-starter`. Le tre variabili CodeQL sono **obbligatorie**
-(senza, `config.py` si ferma con un messaggio esplicito):
+### Windows (PowerShell)
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip
+pip install -r requirements.txt        # mcp + ollama + python-dotenv
+pip install pytest                      # solo se vuoi lanciare i test
+```
+
+Crea il file `.env` nella root (adatta i percorsi alla tua macchina):
 
 ```env
-# percorsi del checkout vscode-codeql-starter (adatta alla tua macchina)
-CODEQL_SEARCH_PATH=C:\path\to\vscode-codeql-starter\ql
-CODEQL_SUITE=C:\path\to\vscode-codeql-starter\ql\python\ql\src\codeql-suites\python-security-extended.qls
-CUSTOM_QUERY_DIR=C:\path\to\vscode-codeql-starter\codeql-custom-queries-python
-
-# opzionali (questi hanno un default)
-AGENT_MODEL=qwen2.5-coder:14b
-OLLAMA_HOST=http://localhost:11434
-CODEQL_BIN=codeql
+CODEQL_BIN=C:\codeql-tools\codeql\codeql.exe
+CODEQL_SEARCH_PATH=C:\codeql-tools\vscode-codeql-starter\ql
+CODEQL_SUITE=C:\codeql-tools\vscode-codeql-starter\ql\python\ql\src\codeql-suites\python-security-extended.qls
+CUSTOM_QUERY_DIR=C:\codeql-tools\vscode-codeql-starter\codeql-custom-queries-python
+AGENT_MODEL=qwen2.5-coder:3b
 ```
 
 `.env` è in `.gitignore`: ogni macchina ha il suo.
 
 ## Uso
 
-```powershell
-uv run python agent.py "C:\path\alla\repo"
-#   oppure: python agent.py "C:\path\alla\repo"
-# opzioni: --model qwen2.5-coder:7b   --max-steps 30   --resume   --report path.md
+Servono **due terminali** (il server resta in ascolto, l'agente lo usa). La
+repository da analizzare deve stare **sulla stessa macchina del server**.
+
+### Ubuntu / Linux
+
+```bash
+# Terminale A — avvia il server MCP (resta in esecuzione)
+source .venv/bin/activate
+MCP_TRANSPORT=sse python -m server          # atteso: "tools registered: 41" su :8000
+
+# Terminale B — lancia l'agente
+source .venv/bin/activate
+python -m agent /percorso/alla/repo
+#   esempio incluso:  python -m agent _smoketest_repo
+#   opzioni: --model qwen2.5-coder:3b  --max-steps 30  --resume  --report out.md
 ```
 
-Il report Markdown viene salvato **automaticamente** in
-`reports/<repo>/<model>__<timestamp>.md`, con front-matter YAML (model, repository,
-durata, tools_used, cwes_found, total_findings). `--report` forza un path specifico
-ma non è necessario. Database CodeQL e SARIF intermedi finiscono in `_work/`.
-
-Esempio sugli insecure config flag (repo di prova con tutti i pattern):
+### Windows (PowerShell)
 
 ```powershell
-python agent.py _insecure_config_testrepo
+# Terminale A — avvia il server MCP (resta in esecuzione)
+.\.venv\Scripts\Activate.ps1
+$env:MCP_TRANSPORT = "sse"; python -m server
+
+# Terminale B — lancia l'agente
+.\.venv\Scripts\Activate.ps1
+python -m agent C:\percorso\alla\repo
+#   opzioni: --model qwen2.5-coder:3b  --max-steps 30  --resume  --report out.md
 ```
 
-## Estendere: aggiungere un template
+L'agente accetta anche un file **`.zip`** (lo estrae da solo). Durante l'esecuzione
+stampa l'avanzamento live su stderr (`[step N] -> tool(...)`, tempi, esito).
 
-1. Scrivi `query_templates/<nome>.ql.tmpl` con placeholder `{{CWE_ID_SUFFIX}}` /
-   `{{CWE_TAG_LINE}}` (più gli eventuali segnaposto specifici).
-2. Registra il tool in `codeql_mcp_server.py`
-   (per gli insecure config flag basta una voce in `INSECURE_CONFIG_FLAG_TEMPLATES`,
-   il tool `check_insecure_<key>` viene generato in automatico).
-3. Valida con `codeql query compile`.
-4. Aggiungi la voce a `knowledge/cwe_wiki.json` (con `detection` e `actions`).
-5. `python build_actions.py` per rigenerare/completare le azioni.
-6. Aggiungi i test in `tests_agent.py` (compile + integrazione).
+Il report Markdown è salvato in `agent/reports/<repo>/<model>__<timestamp>.md`, con
+front-matter YAML (model, repository, durata, tools_used, cwes_found,
+total_findings). `--report` forza un percorso specifico. Database CodeQL e SARIF
+intermedi finiscono in `server/_work/`; i checkpoint dell'agente in `agent/_work/`.
+
+## Estensione VS Code
+
+In `extension/` c'è un'estensione VS Code che fa da **telecomando** dell'agente: non
+analizza in proprio, lancia la **CLI** di Sibyl (`python -m agent <repo>`) come
+sottoprocesso e mostra il report in un pannello a destra. È utile per avviare
+un'analisi senza usare il terminale.
+
+### Installazione (uso normale)
+
+Serve **Node.js 18+**. Si crea un pacchetto `.vsix` e lo si installa una volta:
+
+```bash
+cd extension
+npm install
+npm run package                              # genera sibyl.vsix
+code --install-extension sibyl.vsix --force
+```
+
+Poi **ricarica VS Code** (*Developer: Reload Window*): l'estensione è attiva in ogni
+finestra. Al primo comando, se non trova l'installazione di Sibyl, la chiede e salva il
+percorso in **`sibyl.rootPath`**.
+
+> Da installata, l'estensione non sta più dentro la cartella di Sibyl: imposta
+> **`sibyl.rootPath`** sulla root del progetto (con venv, `sibyl.pythonPath` punta da solo
+> a `<rootPath>/.venv/bin/python`). I prerequisiti (CodeQL, `.env`, Ollama o API key) sono
+> quelli descritti sopra: l'estensione li riutilizza, non li sostituisce.
+
+### Installazione (modalità sviluppo)
+
+Per lavorare al codice dell'estensione: `npm install`, apri la cartella `extension/` in
+VS Code e premi **F5** (apre l'*Extension Development Host* coi sorgenti). In questo caso
+`sibyl.rootPath` viene dedotto in automatico.
+
+### Uso
+
+Apri una repo Python da analizzare, poi dalla **Command Palette** (`Ctrl+Shift+P`):
+
+0. **`Sibyl: Configurazione (.env)`** — apre un form per impostare i percorsi CodeQL e il
+   provider/chiavi LLM, scritti direttamente nel `.env` (alternativa user-friendly all'editing a mano).
+1. **`Sibyl: Avvia Server MCP`** — avvia il server (equivale a `MCP_TRANSPORT=sse python -m server`).
+   Se lanci l'analisi senza server attivo, l'estensione propone di avviarlo.
+2. **`Sibyl: Analizza Repository`** — esegue l'agente sulla repo aperta (o, se non c'è
+   workspace, chiede una cartella) e a fine analisi apre il **report a destra**.
+   L'avanzamento live è nel canale di output **"Sibyl"**.
+3. **`Sibyl: Ferma Server MCP`** — ferma il server avviato dall'estensione.
+
+### Impostazioni (`sibyl.*`)
+
+| Setting | Default | Significato |
+|---|---|---|
+| `sibyl.rootPath` | _(auto)_ | cartella con `agent/`/`server/` (default: padre dell'estensione, poi workspace) |
+| `sibyl.pythonPath` | _(auto)_ | interprete Python (default: `<rootPath>/.venv/bin/python`, poi `python3`) |
+| `sibyl.provider` | `auto` | backend LLM (`--provider`). `auto` = usa il `.env` (`AGENT_LLM_PROVIDER`) |
+| `sibyl.model` | _(da `.env`)_ | modello LLM (`--model`). Se vuoto usa il modello del `.env` |
+| `sibyl.mcpServerUrl` | `http://127.0.0.1:8000/sse` | URL del server MCP (`MCP_SERVER_URL`) |
+| `sibyl.manageServer` | `true` | se `true` l'estensione può avviare/fermare il server; se `false` si collega soltanto |
+| `sibyl.maxSteps` | `30` | passi massimi dell'agente (`--max-steps`) |
+
+> **Collegarsi a un server già avviato:** imposta `sibyl.mcpServerUrl` sul tuo server.
+> Se è raggiungibile, `Sibyl: Analizza Repository` lo usa senza avviarne uno nuovo. Per
+> evitare del tutto l'avvio automatico (es. server su un'altra porta/host che gestisci tu),
+> metti `sibyl.manageServer` a `false`: l'estensione si limita a connettersi.
 
 ## Test
 
-```powershell
-pytest -m "not codeql and not llm"   # veloci (unit + KB), nessuna dipendenza esterna
+```bash
+pytest -m "not codeql and not llm"   # veloci (unit agente + server), nessuna dipendenza esterna
 pytest -m "not llm"                  # + compile/integrazione CodeQL (lenti)
 pytest                               # + end-to-end LLM (molto lento)
 ```
 
+I test puri dell'agente girano anche senza Ollama:
+`pytest agent/tests/test_agent.py`.
+
 ## Configurazione (via `.env` o variabili d'ambiente)
 
-| Variabile | Obbligatoria | Default |
-|-----------|:---:|---------|
-| `CODEQL_SEARCH_PATH` | ✅ | — (percorso al checkout) |
-| `CODEQL_SUITE` | ✅ | — |
-| `CUSTOM_QUERY_DIR` | ✅ | — |
-| `AGENT_MODEL` | | `qwen2.5-coder:14b` |
-| `OLLAMA_HOST` | | `http://localhost:11434` |
-| `CODEQL_BIN` | | `codeql` |
-| `CODEQL_TIMEOUT` | | `1800` |
+**Server MCP** (lette da `server/config.py`):
 
-Le tre obbligatorie non hanno default: se mancano, `config.py` solleva un errore
-con il nome della variabile da impostare.
+| Variabile | Obbligatoria | Default | Significato |
+|---|:---:|---|---|
+| `CODEQL_SEARCH_PATH` | ✅ | — | cartella `ql` del checkout vscode-codeql-starter |
+| `CODEQL_SUITE` | ✅ | — | file `.qls` della suite di sicurezza |
+| `CUSTOM_QUERY_DIR` | ✅ | — | cartella con le query custom `*Broad.ql` |
+| `CODEQL_BIN` | | `codeql` | binario CodeQL (percorso completo se non su PATH) |
+| `MCP_TRANSPORT` | | `stdio` | trasporto: `stdio` / `sse` / `streamable-http` |
+| `MCP_HOST` / `MCP_PORT` | | `127.0.0.1` / `8000` | indirizzo e porta (solo trasporti di rete; il server non ha autenticazione, impostare `0.0.0.0` solo deliberatamente) |
+| `CODEQL_TIMEOUT` | | `1800` | timeout (s) per comando CodeQL |
+| `SIBYL_LOG_LEVEL` | | `INFO` | verbosità log del server |
+
+**Agente** (lette da `agent/config.py`):
+
+| Variabile | Default | Significato |
+|---|---|---|
+| `AGENT_LLM_PROVIDER` | `ollama` | backend: `ollama` (locale), `gemini` o `openai` (OpenAI-compat) |
+| `AGENT_MODEL` | `qwen2.5-coder:14b` | modello Ollama da usare |
+| `OLLAMA_HOST` | `http://localhost:11434` | indirizzo di Ollama |
+| `OLLAMA_SHOW_THINKING` | `false` | se `true`, stampa su stderr il "thinking" del modello mentre arriva |
+| `OLLAMA_SHOW_THINKING_WITH_TOOLS` | `false` | come sopra, ma anche nei turni in cui sono esposti tool |
+| `OLLAMA_REPEAT_PENALTY` | `1.1` | penalità di ripetizione (anti-loop per modelli piccoli/quantizzati; un valore troppo alto causa testo "degenerato", vedi `agent/robustness/degenerate.py`) |
+| `OLLAMA_REPEAT_LAST_N` | `128` | quante posizioni indietro considerare per la penalità |
+| `OLLAMA_NUM_PREDICT` | `1536` | tetto massimo di token generati in un turno (`-1` = nessun limite) |
+| `OLLAMA_NUM_PREDICT_TOOLS` | `512` | tetto più corto usato nei turni in cui sono esposti tool |
+| `OLLAMA_TEMPERATURE` | `0.2` | temperatura di campionamento |
+| `OLLAMA_TOP_P` | `0.85` | nucleus sampling |
+| `OLLAMA_TOP_K` | `40` | top-k sampling |
+| `GEMINI_API_KEY` | — | API key di Google AI Studio (solo per `gemini`) |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | modello Gemini (es. `gemini-2.0-flash`) |
+| `GEMINI_BASE_URL` | endpoint OpenAI-compat di Google | endpoint alternativo (proxy/gateway compatibile) |
+| `GEMINI_MIN_INTERVAL` | `0` | intervallo minimo (s) tra richieste, per il throttle lato client |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | — / OpenAI | chiave + endpoint per provider `openai` (Groq/Cerebras/...) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | modello per il provider `openai` |
+| `OPENAI_MIN_INTERVAL` | `0` | intervallo minimo (s) tra richieste, per il throttle lato client |
+| `MCP_SERVER_URL` | `http://127.0.0.1:8000/sse` | URL SSE del server MCP |
+| `AGENT_WORK_DIR` | `agent/_work` | dove salvare i checkpoint |
+| `AGENT_REPORTS_DIR` | `agent/reports` | dove salvare i report |
+
+### Scegliere il provider LLM
+
+L'agente può usare un modello **locale** (Ollama) o uno **hosted** (Gemini, utile
+quando la GPU locale non è pronta). Il provider si sceglie con `--provider` o con
+`AGENT_LLM_PROVIDER`:
+
+```bash
+# Ollama (default)
+python -m agent _smoketest_repo
+
+# Gemini (serve una API key di Google AI Studio, non l'abbonamento dell'app)
+export GEMINI_API_KEY=...          # o mettila nel .env
+python -m agent _smoketest_repo --provider gemini --model gemini-2.0-flash
+
+# Qualsiasi API OpenAI-compatibile (es. Groq: free tier generoso e veloce)
+export OPENAI_BASE_URL=https://api.groq.com/openai/v1
+export OPENAI_API_KEY=gsk_...
+python -m agent _smoketest_repo --provider openai --model llama-3.3-70b-versatile
+```
+
+> Per Gemini/OpenAI-compat serve `pip install openai` (incluso in `requirements.txt`).
+> Free tier consigliati per l'uso ad agente (molte richieste): **Groq**
+> (https://console.groq.com) o **Cerebras**; Gemini free è più limitato.
+
+Le tre obbligatorie non hanno default: se mancano, il server si ferma con un errore
+che indica la variabile da impostare.
+
+## Estendere: aggiungere un template
+
+1. Scrivi `server/query_templates/<nome>.ql.tmpl` con placeholder `{{CWE_ID_SUFFIX}}` /
+   `{{CWE_TAG_LINE}}` (più gli eventuali segnaposto specifici).
+2. Registra il tool nel server (per gli insecure config flag basta una voce in
+   `INSECURE_CONFIG_FLAG_TEMPLATES`, il tool `check_insecure_<key>` viene generato
+   in automatico da `server/registry/loader.py`).
+3. Valida con `codeql query compile`.
+4. Aggiungi la voce a `server/knowledge/cwe_wiki.json` (con `detection` e `actions`).
+5. `python build_actions.py` per rigenerare/completare le azioni.
+6. Aggiungi i test in `server/tests/test_server.py` (compile + integrazione).

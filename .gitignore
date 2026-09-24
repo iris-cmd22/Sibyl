@@ -1,6 +1,7 @@
 # --- Local config (machine-specific paths, secrets) ---
 .env
 .env.*
+!.env.example
 
 # --- Python ---
 __pycache__/
@@ -18,9 +19,19 @@ reports/
 *.sarif
 
 # --- Generated queries (rese a runtime); keep only the qlpack manifest ---
-generated_queries/*.ql
-!generated_queries/qlpack.yml
+# Match in qualsiasi posizione (root storica e server/generated_queries/).
+**/generated_queries/*.ql
+!**/generated_queries/qlpack.yml
 
 # --- Run logs / smoke outputs ---
 *.log
 _smoketest_report.md
+.venv/
+__pycache__/
+
+# --- VSCode extension (Node) ---
+extension/node_modules/
+extension/out/
+extension/*.vsix
+graphify-out/.graphify_root
+/graphify-out

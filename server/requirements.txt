@@ -1,0 +1,4 @@
+# CodeQL MCP server — runtime dependencies only.
+mcp>=1.0.0
+# Optional: loads a local .env for path overrides. Safe to omit.
+python-dotenv>=1.0.0
