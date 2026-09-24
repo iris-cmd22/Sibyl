@@ -23,6 +23,8 @@ const CODEQL_FIELDS: EnvField[] = [
 /** Campi LLM in modalità Locale (Ollama). */
 const LLM_LOCAL_FIELDS: EnvField[] = [
   { key: 'AGENT_MODEL', label: 'Modello Ollama', group: 'LLM', kind: 'text', hint: 'Es. qwen2.5-coder:14b.' },
+  { key: 'OLLAMA_NUM_CTX', label: 'Context window (num_ctx)', group: 'LLM', kind: 'text',
+    hint: 'Vuoto = calcolato in automatico dalla dimensione del modello (vedi il valore suggerito nel campo). Imposta un numero per fissarlo esplicitamente, es. se il modello va in OOM ("heap crash") a quel valore.' },
   { key: 'OLLAMA_HOST', label: 'Ollama host', group: 'LLM', kind: 'text', hint: 'Default http://localhost:11434.' },
 ];
 
@@ -201,6 +203,29 @@ export function renderConfigHtml(values: Record<string, string>, envPath: string
       document.getElementById('local-fields').style.display = m === 'local' ? 'block' : 'none';
       document.getElementById('remote-fields').style.display = m === 'remote' ? 'block' : 'none';
     }
+    // Stessa euristica di agent/config.py:_suggested_num_ctx - tenere sincronizzate.
+    function suggestNumCtx(model) {
+      const m = /:(\d+(?:\.\d+)?)b\b/i.exec(model || '');
+      if (!m) { return 8192; }
+      const sizeB = parseFloat(m[1]);
+      if (sizeB <= 3) { return 16384; }
+      if (sizeB <= 7) { return 12288; }
+      if (sizeB <= 13) { return 6144; }
+      if (sizeB <= 24) { return 8192; }
+      return 4096;
+    }
+    function updateNumCtxPlaceholder() {
+      const modelEl = document.querySelector('[data-key="AGENT_MODEL"]');
+      const ctxEl = document.querySelector('[data-key="OLLAMA_NUM_CTX"]');
+      if (modelEl && ctxEl) {
+        ctxEl.placeholder = 'auto: ' + suggestNumCtx(modelEl.value);
+      }
+    }
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute('data-key') === 'AGENT_MODEL') {
+        updateNumCtxPlaceholder();
+      }
+    });
     function save() {
       const values = {};
       document.querySelectorAll('[data-key]').forEach((el) => {
@@ -219,6 +244,7 @@ export function renderConfigHtml(values: Record<string, string>, envPath: string
       }
     });
     toggleMode();
+    updateNumCtxPlaceholder();
   </script>
 </body>
 </html>`;

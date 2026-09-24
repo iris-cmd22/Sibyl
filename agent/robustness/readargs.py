@@ -14,7 +14,10 @@ from pathlib import Path
 # Come realizzato: se manca "file" ma c'e' "file_path", lo adotta come "file" dopo aver
 #            tolto uno slash iniziale, un eventuale "./" e un prefisso duplicato col nome
 #            della cartella del repo (es. "repo/app.py" quando repo_path e' gia' "repo").
-#            Se manca "repo_path", inietta quello vero (come gia' si fa per db_path).
+#            repo_path stesso NON va corretto qui: l'orchestratore lo sovrascrive sempre
+#            per ogni tool che lo dichiara nello schema (agent/orchestrator.py:
+#            repo_path_tools), quindi qualunque valore il modello passi per repo_path
+#            e' comunque ignorato — solo file/file_path e' un problema di QUESTO tool.
 def fix_read_file_snippet_args(args: dict, repo_path: str) -> dict:
     if "file" not in args and "file_path" in args:
         f = str(args.pop("file_path"))
@@ -25,5 +28,4 @@ def fix_read_file_snippet_args(args: dict, repo_path: str) -> dict:
         if base and (f == base or f.startswith(base + "/") or f.startswith(base + "\\")):
             f = f[len(base):].lstrip("/\\")
         args["file"] = f
-    args.setdefault("repo_path", repo_path)
     return args

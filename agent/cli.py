@@ -17,9 +17,16 @@ from agent.source import resolve_source
 # Input:    nessuno (legge gli argomenti da sys.argv via argparse).
 # Output:   nessuno; stampa il report a video e lo salva su file.
 # Come realizzato: definisce gli argomenti (repo, --provider, --model, --report, --max-steps,
-#            --resume), sceglie il modello di default in base al provider, risolve la sorgente,
-#            calcola il percorso del report, avvisa se c'è un checkpoint, e lancia run_agent.
+#            --resume, --keep-checkpoint, --clear-checkpoint), sceglie il modello di default
+#            in base al provider, risolve la sorgente, calcola il percorso del report, avvisa
+#            se c'è un checkpoint, e lancia run_agent (--clear-checkpoint esce prima, senza
+#            lanciare l'agent — vedi il branch dedicato sotto).
 def main() -> None:
+    # La console Windows usa spesso cp1252: forziamo UTF-8 (con replace di riserva)
+    # per non crashare su caratteri come '‑' generati dal modello.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     ap = argparse.ArgumentParser(description="CodeQL security agent (Ollama/Gemini + MCP)")
     ap.add_argument("repo_path", help="Path to the repository (a directory or a .zip)")
     ap.add_argument("--provider", default=config.LLM_PROVIDER,
@@ -33,6 +40,15 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=30)
     ap.add_argument("--resume", action="store_true",
                     help="Resume from the saved checkpoint for this repo, if any.")
+    ap.add_argument("--keep-checkpoint", action="store_true",
+                    help="Don't delete the checkpoint after a successful run. Lets a "
+                         "later --resume redo just Validation (gathering+detection are "
+                         "already in completed_phases) without re-running Detection.")
+    ap.add_argument("--clear-checkpoint", action="store_true",
+                    help="Delete the saved checkpoint for this repo (if any) and exit — "
+                         "does NOT run the agent. Use this to discard a checkpoint left "
+                         "by an interrupted run (e.g. cancelled mid-Detection) instead "
+                         "of resuming into that partial/stale state.")
     args = ap.parse_args()
 
     # Per-provider default model when --model is omitted.
@@ -40,16 +56,29 @@ def main() -> None:
     model = args.model or _defaults.get(args.provider, config.AGENT_MODEL)
 
     repo_path = resolve_source(args.repo_path)
+    ckpt = checkpoint_path(repo_path)
+
+    if args.clear_checkpoint:
+        if ckpt.exists():
+            ckpt.unlink()
+            print(f"Checkpoint deleted: {ckpt}", file=sys.stderr)
+        else:
+            print(f"No checkpoint found for this repo ({ckpt.name}).", file=sys.stderr)
+        return
+
     report_path = args.report or default_report_path(args.repo_path, model)
 
-    ckpt = checkpoint_path(repo_path)
     if ckpt.exists() and not args.resume:
         print(f"NOTE: a checkpoint exists ({ckpt.name}). Re-run with --resume to "
               f"continue it, or it will be overwritten by this fresh run.", file=sys.stderr)
+    elif args.resume and not ckpt.exists():
+        print("NOTE: --resume was passed but no checkpoint exists for this repo — "
+              "running a full analysis from scratch instead.", file=sys.stderr)
     print(f"Report will be saved to: {report_path}", file=sys.stderr)
 
     report = asyncio.run(
-        run_agent(repo_path, model, report_path, args.max_steps, args.resume, args.provider)
+        run_agent(repo_path, model, report_path, args.max_steps, args.resume, args.provider,
+                  args.keep_checkpoint)
     )
     print("\n" + "=" * 70)
     print(report)

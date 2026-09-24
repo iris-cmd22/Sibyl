@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isServerUp, resolveConfig, runAgent, startServer, stopServer } from './sibylRunner';
+import { clearCheckpoint, isServerUp, resolveConfig, runAgent, startServer, stopServer } from './sibylRunner';
 import { renderMarkdown } from './markdown';
 import { envFilePath, readEnvValues, renderConfigHtml, writeEnvValues } from './envConfig';
 import { createProgressPanel } from './progressView';
@@ -37,19 +37,19 @@ export function activate(context: vscode.ExtensionContext) {
     diagnostics,
     statusBarItem,
     vscode.commands.registerCommand('sibyl.analyzeRepository', () => analyzeRepository(context)),
-    vscode.commands.registerCommand('sibyl.startServer', async () => {
-      const config = await getValidConfig(context);
-      if (!config) {
-        return;
-      }
-      channel.show(true);
-      startServer(config, channel);
-    }),
+    vscode.commands.registerCommand('sibyl.resumeValidation', () => analyzeRepository(context, { resume: true })),
+    vscode.commands.registerCommand('sibyl.startServer', () => startServerCommand(context)),
     vscode.commands.registerCommand('sibyl.stopServer', () => {
       channel.show(true);
-      stopServer(channel);
+      const stopped = stopServer(channel);
+      if (stopped) {
+        vscode.window.showInformationMessage('Sibyl: server MCP fermato.');
+      } else {
+        vscode.window.showWarningMessage('Sibyl: nessun server MCP in esecuzione (avviato da questa estensione).');
+      }
     }),
     vscode.commands.registerCommand('sibyl.configure', () => openConfig(context)),
+    vscode.commands.registerCommand('sibyl.clearCheckpoint', () => clearCheckpointCommand(context)),
   );
 }
 
@@ -139,8 +139,15 @@ async function openConfig(context: vscode.ExtensionContext) {
   }, undefined, context.subscriptions);
 }
 
-/** Comando unico: sceglie la repo, assicura il server, lancia l'agent, mostra il report. */
-async function analyzeRepository(context: vscode.ExtensionContext) {
+/**
+ * Sceglie la repo, assicura il server, lancia l'agent, mostra il report.
+ * @param opts.resume se true, passa --resume: riprende dal checkpoint della repo
+ *   (se gathering+detection erano già completati, rifà solo Validation — vedi
+ *   'sibyl.resumeValidation'). Richiede un run precedente completato con
+ *   --keep-checkpoint (di default per ogni run lanciato da questa estensione);
+ *   se manca, l'agent degrada da solo a un'analisi completa da zero.
+ */
+async function analyzeRepository(context: vscode.ExtensionContext, opts: { resume?: boolean } = {}) {
   const config = await getValidConfig(context);
   if (!config) {
     return;
@@ -181,16 +188,19 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
   // Vista grafica di avanzamento (al posto dei log): riceve gli eventi dell'agent.
   const progressPanel = createProgressPanel(context, path.basename(repoPath), repoPath);
 
+  const title = opts.resume
+    ? `Sibyl: rilancio Validation su ${path.basename(repoPath)}...`
+    : `Sibyl: analisi di ${path.basename(repoPath)}...`;
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: `Sibyl: analisi di ${path.basename(repoPath)}...`,
+      title,
       cancellable: true,
     },
     async (_progress, token) => {
       try {
         const result = await runAgent(
-          config, { repoPath, reportPath }, channel, token,
+          config, { repoPath, reportPath, resume: opts.resume }, channel, token,
           (evt) => progressPanel.update(evt),
         );
         if (token.isCancellationRequested) {
@@ -210,16 +220,68 @@ async function analyzeRepository(context: vscode.ExtensionContext) {
   );
 }
 
-/** Determina la repo da analizzare: workspace singolo, scelta, o file picker. */
-async function pickRepo(): Promise<string | undefined> {
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders && folders.length === 1) {
-    return folders[0].uri.fsPath;
+/** Avvia il server MCP (se non già su) e mostra un popup con l'esito reale (non solo il log). */
+async function startServerCommand(context: vscode.ExtensionContext) {
+  const config = await getValidConfig(context);
+  if (!config) {
+    return;
   }
-  if (folders && folders.length > 1) {
-    const picked = await vscode.window.showWorkspaceFolderPick();
-    return picked?.uri.fsPath;
+  channel.show(true);
+
+  if (await isServerUp(config.mcpServerUrl)) {
+    vscode.window.showInformationMessage(`Sibyl: server MCP già attivo su ${config.mcpServerUrl}.`);
+    return;
   }
+
+  startServer(config, channel);
+  const up = await waitServerUp(config.mcpServerUrl);
+  if (up) {
+    vscode.window.showInformationMessage(`Sibyl: server MCP avviato su ${config.mcpServerUrl}.`);
+  } else {
+    vscode.window.showErrorMessage('Sibyl: il server MCP non si è avviato in tempo. Vedi output "Sibyl".');
+  }
+}
+
+/**
+ * Cancella il checkpoint salvato per una repo (agent/robustness/checkpoint.py), utile
+ * per scartare lo stato lasciato da un run interrotto invece di riprenderlo con
+ * 'sibyl.resumeValidation'. Chiede conferma perché non è annullabile.
+ */
+async function clearCheckpointCommand(context: vscode.ExtensionContext) {
+  const config = await getValidConfig(context);
+  if (!config) {
+    return;
+  }
+
+  const repoPath = await pickRepo();
+  if (!repoPath) {
+    return;
+  }
+
+  const choice = await vscode.window.showWarningMessage(
+    `Cancellare il checkpoint salvato per "${path.basename(repoPath)}"? Un successivo run ripartirà da zero.`,
+    'Cancella checkpoint', 'Annulla',
+  );
+  if (choice !== 'Cancella checkpoint') {
+    return;
+  }
+
+  channel.show(true);
+  try {
+    const result = await clearCheckpoint(config, repoPath, channel);
+    if (result.exitCode !== 0) {
+      vscode.window.showErrorMessage(`Sibyl: cancellazione checkpoint fallita (exit ${result.exitCode}). Vedi output "Sibyl".`);
+      return;
+    }
+    vscode.window.showInformationMessage(`Sibyl: checkpoint cancellato per "${path.basename(repoPath)}".`);
+  } catch (err: any) {
+    vscode.window.showErrorMessage(`Sibyl: impossibile cancellare il checkpoint — ${err.message}`);
+  }
+}
+
+/** Apre il file-picker nativo per scegliere una cartella qualsiasi (anche una
+ *  sottocartella del workspace corrente, es. un repo target annidato in Sibyl). */
+async function browseForRepo(): Promise<string | undefined> {
   const chosen = await vscode.window.showOpenDialog({
     canSelectFolders: true,
     canSelectFiles: false,
@@ -227,6 +289,40 @@ async function pickRepo(): Promise<string | undefined> {
     openLabel: 'Analizza questa repository',
   });
   return chosen?.[0]?.fsPath;
+}
+
+interface RepoPickItem extends vscode.QuickPickItem {
+  fsPath?: string; // undefined = voce "Sfoglia..."
+}
+
+/** Determina la repo da analizzare. NON assume mai in silenzio che l'unico
+ *  workspace aperto sia il target giusto (es. Sibyl aperto come workspace con
+ *  il repo da analizzare annidato in una sua sottocartella) — chiede sempre
+ *  conferma, con "Sfoglia..." sempre disponibile per scegliere qualsiasi altra
+ *  cartella, inclusa una sottocartella del workspace. */
+async function pickRepo(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    return browseForRepo();
+  }
+
+  const items: RepoPickItem[] = folders.map((f) => ({
+    label: `$(root-folder) ${f.name}`,
+    description: f.uri.fsPath,
+    fsPath: f.uri.fsPath,
+  }));
+  items.push({
+    label: '$(folder-opened) Sfoglia...',
+    description: 'Scegli un\'altra cartella, anche una sottocartella del workspace',
+  });
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Quale repository vuoi analizzare?',
+  });
+  if (!picked) {
+    return undefined;
+  }
+  return picked.fsPath ?? browseForRepo();
 }
 
 /** Aspetta che il server risponda (max ~15s). */

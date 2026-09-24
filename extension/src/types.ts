@@ -23,6 +23,9 @@ export interface SibylConfig {
 export interface RunOptions {
   repoPath: string;
   reportPath: string;
+  /** Se true, passa --resume: riprende dal checkpoint (salta le fasi già completate —
+   *  in pratica rifà solo Validation, dato che gathering+detection lo sono già). */
+  resume?: boolean;
 }
 
 /** Esito di un run dell'agent. */

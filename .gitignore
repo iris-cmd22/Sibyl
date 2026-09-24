@@ -33,3 +33,5 @@ __pycache__/
 extension/node_modules/
 extension/out/
 extension/*.vsix
+graphify-out/.graphify_root
+/graphify-out

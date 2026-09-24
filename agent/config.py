@@ -2,6 +2,7 @@
 package so the directory is portable. Override anything via environment variables
 (a local .env in the project root is loaded if python-dotenv is installed)."""
 import os
+import re
 from pathlib import Path
 
 # Root of the agent package (this file's directory). Writable defaults live here.
@@ -46,9 +47,78 @@ OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "1536"))
 OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
 OLLAMA_TOP_P = float(os.environ.get("OLLAMA_TOP_P", "0.85"))
 OLLAMA_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "40"))
+# Context window (token) da chiedere esplicitamente a Ollama per OGNI richiesta. Senza
+# questo, Ollama usa il default del modello (spesso 2048/4096), che con 41 tool MCP
+# esposti + system prompt + storia dei messaggi puo' sforare gia' al primo turno con
+# tool (Detection step 0): il runner crasha e il client vede una risposta troncata
+# (ollama._types.ResponseError: EOF, status 500). Sotto gli 8192 questo bug puo'
+# ripresentarsi, quindi le fasce sotto non scendono mai piu' giu' di cosi'.
+#
+# La KV-cache che Ollama alloca per num_ctx scala pero' con l'architettura del modello,
+# non solo col numero di parametri: modelli sulla fascia ~7-13B (es. qwen3.5:9b) si sono
+# visti andare in OOM/heap crash a 8192 su repo con snippet lunghi (es. SecurityEval),
+# pur essendo piu' piccoli del modello di default 14b che a 8192 e' invece il valore
+# storicamente usato. Percio' il suggerimento sotto NON e' monotono nella dimensione:
+# e' tarato sui casi osservati, non su una formula fisica precisa. E' solo un default
+# di partenza (mostrato come placeholder anche nel form dell'estensione, vedi
+# extension/src/envConfig.ts) - resta sempre sovrascrivibile esplicitamente via env
+# OLLAMA_NUM_CTX o dal campo dedicato nel form.
+_NUM_CTX_SIZE_BUCKETS = [  # (soglia max miliardi di parametri, num_ctx suggerito)
+    (3, 16384),
+    (7, 12288),
+    (13, 6144),
+    (24, 8192),
+]
+_NUM_CTX_FALLBACK = 8192  # taglia non parsabile dal tag del modello.
+_NUM_CTX_ABOVE_24B = 4096  # oltre i 24B il peso dei pesi domina, poco margine per la KV-cache.
+
+
+def _suggested_num_ctx(model: str) -> int:
+    m = re.search(r":(\d+(?:\.\d+)?)b\b", model, re.IGNORECASE)
+    if not m:
+        return _NUM_CTX_FALLBACK
+    size_b = float(m.group(1))
+    for threshold, ctx in _NUM_CTX_SIZE_BUCKETS:
+        if size_b <= threshold:
+            return ctx
+    return _NUM_CTX_ABOVE_24B
+
+
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or _suggested_num_ctx(AGENT_MODEL))
 # In tool-calling mode we want short, structured outputs (one call per turn), not
-# long prose. Keep a lower default budget for turns where tools are exposed.
-OLLAMA_NUM_PREDICT_TOOLS = int(os.environ.get("OLLAMA_NUM_PREDICT_TOOLS", "512"))
+# long prose — but 512 (the old default) measured too tight for a REASONING model
+# like gpt-oss: it always emits a hidden "thinking" pass before the actual tool call
+# (Ollama auto-splits it into message.thinking, separate from message.content/
+# tool_calls), and that reasoning alone regularly ran 700-2000+ tokens even for a
+# single, moderately complex decision (e.g. picking among Validation's 22 tools) —
+# at 512 the model was cut off mid-thought, produced NO tool call, and the turn was
+# wasted. 2048 is comfortable headroom for reasoning + one compact tool call without
+# being the much larger budget batched/multi-item turns need (see
+# OLLAMA_NUM_PREDICT_DETECTION_ITEM and the Detection batch loop's own override).
+OLLAMA_NUM_PREDICT_TOOLS = int(os.environ.get("OLLAMA_NUM_PREDICT_TOOLS", "2048"))
+# Detection's per-item loop (orchestrator.py: the "one candidate per prompt" path used
+# only for provider=ollama) asks for EXACTLY one FLOW/OP line (or NONE) as the item's
+# final non-tool reply — a few dozen tokens, never a paragraph. Kept SEPARATE from
+# OLLAMA_NUM_PREDICT (used for every other non-tool reply, e.g. Validation's free-text
+# report commentary, which legitimately needs more room): capping the shared constant
+# would also cap those. This one only bounds the worst case when a small/quantized model
+# rambles instead of stopping (see the degenerate-text retry logic) — it doesn't change
+# what's asked of the model, so it shouldn't cost accuracy, only wasted generation time.
+OLLAMA_NUM_PREDICT_DETECTION_ITEM = int(
+    os.environ.get("OLLAMA_NUM_PREDICT_DETECTION_ITEM", "300")
+)
+# How many work-list items (flows/ops) Detection packs into a SINGLE LLM call,
+# instead of one call per item. Raw PROMPT tokens are cheap at 15/call (fixed
+# overhead ~600 + ~110-130/item measured for gpt-oss:20b), but that was never
+# the real constraint — gpt-oss always reasons in a hidden "thinking" channel
+# before answering, and that reasoning's length is stochastic (temperature=0.2)
+# and scales with how much it has to judge at once. At 15 items/call, production
+# runs regularly needed 2000-2900+ tokens of hidden reasoning ALONE and still
+# sometimes failed to leave room to write all 15 tagged [N] lines, even with a
+# 4096-token reply budget and num_ctx=8192 — dropped to 8/call to cut that
+# reasoning load per call. Tune down further if a model keeps missing items
+# near the end of a batch (see the "batch gap"/UNVERIFIED log lines).
+OLLAMA_DETECTION_BATCH_SIZE = int(os.environ.get("OLLAMA_DETECTION_BATCH_SIZE", "8"))
 # In tool-calling mode, showing reasoning tends to produce verbose text drift on
 # small local models. Keep it off by default unless explicitly enabled.
 OLLAMA_SHOW_THINKING_WITH_TOOLS = os.environ.get(

@@ -15,12 +15,6 @@
     "Linters",
     "Other"
   ],
-  "activationEvents": [
-    "onCommand:sibyl.analyzeRepository",
-    "onCommand:sibyl.startServer",
-    "onCommand:sibyl.stopServer",
-    "onCommand:sibyl.configure"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -28,6 +22,11 @@
         "command": "sibyl.analyzeRepository",
         "title": "Sibyl: Analizza Repository",
         "icon": "$(shield)"
+      },
+      {
+        "command": "sibyl.resumeValidation",
+        "title": "Sibyl: Rilancia solo Validation (da checkpoint)",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "sibyl.startServer",
@@ -41,6 +40,11 @@
         "command": "sibyl.configure",
         "title": "Sibyl: Configurazione (.env)",
         "icon": "$(gear)"
+      },
+      {
+        "command": "sibyl.clearCheckpoint",
+        "title": "Sibyl: Cancella Checkpoint",
+        "icon": "$(trash)"
       }
     ],
     "configuration": {

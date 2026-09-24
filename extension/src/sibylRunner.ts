@@ -140,15 +140,16 @@ export function startServer(config: SibylConfig, channel: vscode.OutputChannel):
   return serverProcess;
 }
 
-/** Ferma il server MCP se avviato da noi. */
-export function stopServer(channel: vscode.OutputChannel): void {
+/** Ferma il server MCP se avviato da noi. Ritorna true se ha davvero fermato un processo. */
+export function stopServer(channel: vscode.OutputChannel): boolean {
   if (serverProcess) {
     channel.appendLine('[server] arresto in corso...');
     serverProcess.kill();
     serverProcess = undefined;
-  } else {
-    channel.appendLine('[server] nessun processo da fermare.');
+    return true;
   }
+  channel.appendLine('[server] nessun processo da fermare.');
+  return false;
 }
 
 /**
@@ -163,13 +164,19 @@ export function runAgent(
   onEvent?: (evt: any) => void,
 ): Promise<RunResult> {
   const args = ['-m', 'agent', options.repoPath,
-    '--report', options.reportPath, '--max-steps', String(config.maxSteps)];
+    '--report', options.reportPath, '--max-steps', String(config.maxSteps),
+    // Non cancellare il checkpoint a fine run: lo lascia disponibile per un successivo
+    // 'sibyl.resumeValidation' (--resume salta le fasi già completate = rifà solo Validation).
+    '--keep-checkpoint'];
   // 'auto' (o vuoto) = non forzare: lascia decidere al .env (AGENT_LLM_PROVIDER).
   if (config.provider && config.provider !== 'auto') {
     args.push('--provider', config.provider);
   }
   if (config.model) {
     args.push('--model', config.model);
+  }
+  if (options.resume) {
+    args.push('--resume');
   }
 
   channel.appendLine(`[agent] avvio: ${config.pythonPath} ${args.join(' ')}`);
@@ -216,6 +223,45 @@ export function runAgent(
       err.end();
       channel.appendLine(`[agent] terminato (exit ${code}).`);
       resolve({ exitCode: code ?? -1, reportPath: options.reportPath });
+    });
+  });
+}
+
+/**
+ * Cancella il checkpoint salvato per una repo (`python -m agent <repo> --clear-checkpoint`).
+ * Non lancia l'agent: il CLI cancella il file (se esiste) ed esce subito.
+ */
+export function clearCheckpoint(
+  config: SibylConfig,
+  repoPath: string,
+  channel: vscode.OutputChannel,
+): Promise<RunResult> {
+  const args = ['-m', 'agent', repoPath, '--clear-checkpoint'];
+  channel.appendLine(`[agent] avvio: ${config.pythonPath} ${args.join(' ')}`);
+
+  return new Promise((resolve, reject) => {
+    const proc = cp.spawn(config.pythonPath, args, {
+      cwd: config.rootPath,
+      env: childEnv(config),
+    });
+
+    const onLine = (line: string) => channel.appendLine(line);
+    const out = lineSplitter(onLine);
+    const err = lineSplitter(onLine);
+
+    proc.stdout?.on('data', (d) => out.push(d));
+    proc.stderr?.on('data', (d) => err.push(d));
+
+    proc.on('error', (err) => {
+      channel.appendLine(`[agent] errore di avvio: ${err.message}`);
+      reject(err);
+    });
+
+    proc.on('exit', (code) => {
+      out.end();
+      err.end();
+      channel.appendLine(`[agent] terminato (exit ${code}).`);
+      resolve({ exitCode: code ?? -1, reportPath: '' });
     });
   });
 }

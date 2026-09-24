@@ -17,6 +17,27 @@ class WorkList:
     db_path: str | None = None
     candidates: list[dict] = field(default_factory=list)   # flows (find_all_flows)
     operations: list[dict] = field(default_factory=list)   # sensitive ops (the categorized find_* tools)
+    # Detection's STRUCTURED, per-item output — one entry per candidate/operation that
+    # Detection judged worth verifying (never NONE/UNVERIFIED). Populated after Detection
+    # from the same {index -> line} map the batch-gap-retry logic already builds (see
+    # orchestrator.py's Detection loop), so it costs nothing extra to produce. This is
+    # what makes Validation's per-finding loop deterministic: the orchestrator knows the
+    # EXACT count and identity of findings to verify from this list, instead of inferring
+    # "how much is left to check" by parsing the model's free text for CWE mentions (see
+    # agent.md and orchestrator.py:_cited_cwes docstring for why that proxy was unreliable
+    # on CWE-named datasets like SecurityEval).
+    findings: list[dict] = field(default_factory=list)
+
+    # Obiettivo: registrare l'output STRUTTURATO della Detection (una entry per item
+    #            giudicato degno di verifica), cosi' la Validation puo' iterare in modo
+    #            deterministico invece di dover dedurre la copertura dal testo libero.
+    # Input:    idx = indice 1-based dell'item nel worklist (candidates poi operations,
+    #           stesso ordine usato da orchestrator.py); kind = "flow"|"op"; line = la
+    #           riga scritta dalla Detection per questo item (gia' ripulita dal tag [N]);
+    #           item = il dict originale (lo stesso candidate/operation di partenza).
+    # Output:   nessuno (accoda a self.findings).
+    def add_detection_finding(self, idx: int, kind: str, line: str, item: dict) -> None:
+        self.findings.append({"index": idx, "kind": kind, "line": line, "item": item})
 
     # Obiettivo: aggiungere alla work-list i flow CWE-agnostici prodotti da find_all_flows.
     # Input:    payload = il dict (gia' parsato) restituito da find_all_flows.
@@ -128,4 +149,5 @@ class WorkList:
             db_path=d.get("db_path"),
             candidates=d.get("candidates", []),
             operations=d.get("operations", []),
+            findings=d.get("findings", []),
         )
