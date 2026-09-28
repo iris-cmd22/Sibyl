@@ -1,0 +1,18 @@
+/**
+ * @name Code execution inventory
+ * @description CWE-agnostic inventory of dynamic code execution calls (exec/eval/
+ *              compile), surfaced regardless of data flow. No vulnerability class is
+ *              assumed: the agent decides in Validation whether untrusted input
+ *              reaches this call.
+ * @kind problem
+ * @problem.severity recommendation
+ * @security-severity 1.0
+ * @id py/code-exec-inventory{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.Concepts
+
+from CodeExecution call
+select call, "code-exec"

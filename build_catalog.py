@@ -14,8 +14,10 @@ from __future__ import annotations
 import json
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
-import config
+# Bundled knowledge data lives inside the server package.
+CWE_CATALOG_PATH = Path(__file__).resolve().parent / "server" / "knowledge" / "data" / "cwe_catalog.json"
 
 NS = {"c": "http://cwe.mitre.org/cwe-7"}
 
@@ -63,7 +65,7 @@ def main(argv: list[str]) -> int:
         print("ERROR: --xml <path to cwec_latest.xml> is required", file=sys.stderr)
         return 1
     xml_path = args[args.index("--xml") + 1]
-    out = config.CWE_CATALOG_PATH
+    out = CWE_CATALOG_PATH
     if "--out" in args:
         out = args[args.index("--out") + 1]
 

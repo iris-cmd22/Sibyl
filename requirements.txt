@@ -1,3 +1,5 @@
 mcp>=1.0.0
 ollama>=0.4.0
 python-dotenv>=1.0.0
+# Optional: only needed for --provider gemini (OpenAI-compatible client).
+openai>=1.0.0

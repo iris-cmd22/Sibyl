@@ -15,6 +15,8 @@ It consists of **two independent programs** that run in parallel:
 
 Three processes talking over `localhost` (no port exposed externally):
 
+Tre processi che dialogano su `localhost` (nessuna porta esposta all'esterno):
+
 ```
                     ┌─────────────────────────────────────────────┐
                     │  Same machine (Ubuntu or Windows)            │

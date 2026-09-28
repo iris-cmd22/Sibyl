@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "mcp__claude_ai_Notion__notion-update-page",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "Bash(python -c \"import json; json.load\\(open\\('extension/package.json', encoding='utf-8'\\)\\); print\\('package.json OK'\\)\")",
+      "Bash(python -m pytest agent/tests/ -q)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python _gen_chunk01.py)",
+      "Bash(python -c ' *)",
+      "Read(//tmp/**)",
+      "Bash(tasklist)",
+      "Bash(python3)",
+      "Bash(graphify export *)",
+      "Bash(./.venv/Scripts/python.exe \"C:\\\\Users\\\\ladyc\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-ladyc-Documents-GitHub-Sibyl\\\\94d50661-6081-4dd9-ace2-b3543b7cb4eb\\\\scratchpad\\\\test_concurrency.py\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('agent/clients/ollama.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -m pytest agent/tests/ -q)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest agent/tests/ server/tests/ -q)"
+    ]
+  }
+}

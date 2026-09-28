@@ -1,0 +1,28 @@
+/**
+ * @name Randomness call inventory
+ * @description CWE-agnostic inventory of calls to a curated list of randomness-related
+ *              function names. Name-based (CodeQL has no Concept for insecure
+ *              randomness): a fallback, not a semantic detector. No vulnerability class
+ *              is assumed: the agent decides in Validation whether the value is
+ *              security-sensitive (token/key/password/nonce).
+ * @kind problem
+ * @problem.severity recommendation
+ * @security-severity 1.0
+ * @id py/weak-randomness-inventory{{CWE_ID_SUFFIX}}
+ * @tags security{{CWE_TAG_LINE}}
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+
+/** A call whose attribute name (obj.NAME(...)) or bare name (NAME(...)) is in `names`. */
+bindingset[names]
+private predicate callNameIn(DataFlow::CallCfgNode call, string names) {
+  call.getFunction().(DataFlow::AttrRead).getAttributeName() = names
+  or
+  call.getFunction().asExpr().(Name).getId() = names
+}
+
+from DataFlow::CallCfgNode call
+where callNameIn(call, [{{WEAK_CALL_NAMES}}])
+select call, "weak-randomness"

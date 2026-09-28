@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <style>
+    :root {
+      --bg: var(--vscode-editor-background);
+      --fg: var(--vscode-editor-foreground);
+      --border: var(--vscode-panel-border);
+      --muted: var(--vscode-descriptionForeground);
+      --accent: var(--vscode-textLink-foreground);
+      --ok: var(--vscode-testing-iconPassed, #3fb950);
+      --err: var(--vscode-testing-iconFailed, #f85149);
+      --card: rgba(128,128,128,0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family);
+      color: var(--fg); background: var(--bg);
+      margin: 0; padding: 18px; line-height: 1.5;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    .title { font-size: 1.25em; font-weight: 600; }
+    .meta { color: var(--muted); font-size: 0.85em; margin-top: 2px; word-break: break-all; }
+
+    /* --- phase stepper --- */
+    .stepper { display: flex; align-items: center; gap: 6px; margin: 18px 0; }
+    .pill {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--card); opacity: 0.55; transition: opacity .2s, border-color .2s;
+    }
+    .pill.active { opacity: 1; border-color: var(--accent); }
+    .pill.done { opacity: 1; }
+    .pill .ico {
+      width: 18px; height: 18px; flex: none; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 0.9em;
+    }
+    .pill .nm { font-weight: 600; font-size: 0.92em; }
+    .pill.done .ico { color: var(--ok); }
+    .arrow { color: var(--muted); flex: none; }
+
+    /* --- "now" card --- */
+    .card { border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+            padding: 12px 14px; margin: 14px 0; }
+    .lbl { text-transform: uppercase; letter-spacing: .06em; font-size: 0.72em; color: var(--muted); }
+    .now-line { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 1.02em; }
+    .now-line .txt { word-break: break-word; }
+    .now-sub { color: var(--muted); font-size: 0.8em; margin-top: 4px; }
+
+    .spinner {
+      width: 14px; height: 14px; flex: none; border-radius: 50%;
+      border: 2px solid rgba(128,128,128,0.35); border-top-color: var(--accent);
+      animation: spin .8s linear infinite;
+    }
+    .spinner.hidden { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+
+    /* --- tallies --- */
+    .tallies { display: flex; gap: 10px; margin: 14px 0; }
+    .tally { flex: 1; text-align: center; border: 1px solid var(--border);
+             border-radius: 8px; padding: 12px 6px; background: var(--card); }
+    .tally .num { font-size: 1.8em; font-weight: 700; }
+    .tally .num.ok { color: var(--ok); }
+    .tally .lab { color: var(--muted); font-size: 0.78em; margin-top: 2px; }
+
+    /* --- activity log --- */
+    ul.log { list-style: none; margin: 8px 0 0; padding: 0; }
+    ul.log li { display: flex; align-items: center; gap: 8px; padding: 4px 0;
+                font-size: 0.9em; border-bottom: 1px solid rgba(128,128,128,0.12); }
+    ul.log li:last-child { border-bottom: none; }
+    ul.log .st { width: 16px; text-align: center; flex: none; }
+    ul.log .st.ok { color: var(--ok); } ul.log .st.err { color: var(--err); }
+    ul.log .nm { font-family: 'Consolas','Courier New',monospace; }
+    ul.log .du { margin-left: auto; color: var(--muted); font-size: 0.82em; }
+
+    .banner { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+              border: 1px solid var(--ok); color: var(--ok); font-weight: 600; word-break: break-all; }
+
+    /* --- findings: solo cio' che viene trovato, catena dei path gia' calcolati da
+       CodeQL (source -> hop -> ... -> sink), niente CFG/dependency-graph generico --- */
+    .finding { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+               margin: 10px 0; background: var(--card); }
+    .finding .fhead { font-weight: 600; margin-bottom: 8px; font-size: 0.92em; }
+    .finding .fhead .cwe { color: var(--accent); }
+    .chain { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+    .hop { flex: none; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+           font-size: 0.8em; cursor: pointer; background: var(--bg); max-width: 220px; }
+    .hop:hover { border-color: var(--accent); }
+    .hop .hf { font-family: 'Consolas','Courier New',monospace; white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
+    .hop.src { border-color: var(--ok); }
+    .hop.sink { border-color: var(--err); }
+    .chain-arrow { flex: none; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">🛡️ Sibyl — Avanzamento</div>
+    <div class="meta" id="meta">in attesa di avvio…</div>
+
+    <div class="stepper" id="stepper"></div>
+
+    <div class="card">
+      <div class="lbl">Adesso</div>
+      <div class="now-line">
+        <span class="spinner hidden" id="spin"></span>
+        <span class="txt" id="activity">—</span>
+      </div>
+      <div class="now-sub"><span id="elapsed">00:00</span></div>
+    </div>
+
+    <div class="tallies">
+      <div class="tally"><div class="num" id="c-cand">0</div><div class="lab">Flow candidati</div></div>
+      <div class="tally"><div class="num" id="c-find">0</div><div class="lab">Finding</div></div>
+      <div class="tally"><div class="num ok" id="c-cwe">0</div><div class="lab">CWE</div></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Attività recenti</div>
+      <ul class="log" id="log"></ul>
+    </div>
+
+    <div class="card" id="findingsCard" style="display:none;">
+      <div class="lbl">Trovati</div>
+      <div id="findings"></div>
+    </div>
+
+    <div class="banner" id="banner"></div>
+  </div>
+
+  <script>
+    const vscodeApi = acquireVsCodeApi();
+    const PHASE_LABEL = { detection: 'Detection', validation: 'Validation' };
+
+    let phases = ['detection', 'validation'];
+    const phaseState = {};
+    let startTime = null, timer = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function fmt(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    }
+    function tick() { if (startTime) $('elapsed').textContent = fmt(Date.now() - startTime); }
+
+    function renderStepper() {
+      const el = $('stepper'); el.innerHTML = '';
+      phases.forEach((p, i) => {
+        const st = phaseState[p] || 'pending';
+        const pill = document.createElement('div');
+        pill.className = 'pill ' + st;
+        const ico = st === 'done' ? '✓' : (st === 'active' ? '<span class="spinner"></span>' : '<span class="dot"></span>');
+        pill.innerHTML = '<span class="ico">' + ico + '</span><span class="nm">' + (PHASE_LABEL[p] || p) + '</span>';
+        el.appendChild(pill);
+        if (i < phases.length - 1) {
+          const a = document.createElement('span'); a.className = 'arrow'; a.textContent = '›';
+          el.appendChild(a);
+        }
+      });
+    }
+
+    function setActivity(text, spinning) {
+      $('activity').textContent = text;
+      $('spin').classList.toggle('hidden', !spinning);
+    }
+
+    /** Ultimo segmento di un path (per etichettare l'hop senza sommergere di testo). */
+    function basename(p) {
+      const parts = String(p || '').split(/[\\/]/);
+      return parts[parts.length - 1] || String(p || '?');
+    }
+
+    /** Disegna UN finding appena confermato: solo cio' che e' stato trovato (il path
+     *  gia' calcolato da CodeQL), come catena di riquadri — niente CFG/grafo generico. */
+    function renderFinding(e) {
+      $('findingsCard').style.display = 'block';
+      const list = $('findings');
+      const box = document.createElement('div'); box.className = 'finding';
+
+      const head = document.createElement('div'); head.className = 'fhead';
+      const cwe = document.createElement('span'); cwe.className = 'cwe';
+      cwe.textContent = e.cwe || 'unclassified';
+      head.appendChild(cwe);
+      if (e.rule_id) {
+        head.appendChild(document.createTextNode(' · ' + e.rule_id));
+      }
+      box.appendChild(head);
+
+      const chain = document.createElement('div'); chain.className = 'chain';
+      const hops = (e.flow_path && e.flow_path.length) ? e.flow_path : [{ file: e.file, line: e.line }];
+      hops.forEach((hop, i) => {
+        if (i > 0) {
+          const arrow = document.createElement('span');
+          arrow.className = 'chain-arrow'; arrow.textContent = '→';
+          chain.appendChild(arrow);
+        }
+        const hopEl = document.createElement('div');
+        hopEl.className = 'hop' + (i === 0 ? ' src' : '') + (i === hops.length - 1 ? ' sink' : '');
+        hopEl.title = (hop.file || '') + ':' + (hop.line || '') + (hop.note ? '\n' + hop.note : '');
+        const label = document.createElement('div'); label.className = 'hf';
+        label.textContent = basename(hop.file) + ':' + (hop.line != null ? hop.line : '?');
+        hopEl.appendChild(label);
+        hopEl.addEventListener('click', () => {
+          vscodeApi.postMessage({ t: '__open', file: hop.file, line: hop.line });
+        });
+        chain.appendChild(hopEl);
+      });
+      box.appendChild(chain);
+      list.insertBefore(box, list.firstChild);
+    }
+
+    function pushLog(state, name, sub) {
+      const ul = $('log');
+      const li = document.createElement('li');
+      const icon = state === 'ok' ? '✓' : (state === 'error' ? '✕' : (state === 'cached' ? '⟳' : (state === 'nodb' ? '⚠' : '·')));
+      const cls = state === 'ok' ? 'ok' : (state === 'error' ? 'err' : '');
+      li.innerHTML = '<span class="st ' + cls + '">' + icon + '</span>' +
+                     '<span class="nm"></span><span class="du"></span>';
+      li.querySelector('.nm').textContent = name;
+      li.querySelector('.du').textContent = sub || '';
+      ul.insertBefore(li, ul.firstChild);
+      while (ul.children.length > 10) ul.removeChild(ul.lastChild);
+    }
+
+    function handle(e) {
+      if (!e || !e.t) return;
+      switch (e.t) {
+        case 'start':
+          phases = (e.phases && e.phases.length) ? e.phases : phases;
+          phases.forEach((p) => phaseState[p] = 'pending');
+          $('meta').textContent = (e.repo || '') + '  ·  ' + (e.provider || '') + '/' + (e.model || '');
+          startTime = Date.now(); if (!timer) timer = setInterval(tick, 500);
+          renderStepper(); setActivity('avvio…', true); break;
+        case 'phase':
+          phaseState[e.phase] = (e.state === 'done') ? 'done' : 'active';
+          renderStepper(); break;
+        case 'think':
+          phaseState[e.phase] = 'active'; renderStepper();
+          setActivity('Il modello sta ragionando…', true); break;
+        case 'tool':
+          if (e.state === 'running') {
+            setActivity(e.name + (e.args ? '  ' + e.args : ''), true);
+          } else {
+            const sub = (e.dur != null) ? e.dur + 's'
+              : (e.state === 'cached' ? 'cache' : (e.state === 'nodb' ? 'DB mancante' : e.state));
+            pushLog(e.state, e.name, sub);
+            setActivity('in attesa del prossimo passo…', false);
+          }
+          break;
+        case 'counts':
+          $('c-cand').textContent = e.candidates; $('c-find').textContent = e.findings;
+          $('c-cwe').textContent = e.cwes; break;
+        case 'finding':
+          renderFinding(e); break;
+        case 'done':
+          phases.forEach((p) => phaseState[p] = 'done'); renderStepper();
+          setActivity('Completato', false);
+          if (timer) { clearInterval(timer); timer = null; }
+          const b = $('banner'); b.style.display = 'block';
+          b.textContent = '✓ Completato · ' + e.findings + ' finding · ' + e.cwes + ' CWE · ' + (e.report || '');
+          break;
+      }
+    }
+
+    window.addEventListener('message', (ev) => handle(ev.data));
+    renderStepper();
+    vscodeApi.postMessage({ t: '__ready' });   // tell the host we can receive events
+  </script>
+</body>
+</html>
