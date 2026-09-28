@@ -1,0 +1,69 @@
+/**
+ * @name Templated name-based taint flow
+ * @description Agent-supplied name-based source/sink/sanitizer taint tracking.
+ *              Source/sink/sanitizer method (or function) names are injected by
+ *              the run_taint_query tool. Used to VERIFY a taint hypothesis without
+ *              writing CodeQL by hand.
+ * @kind path-problem
+ * @problem.severity recommendation
+ * @security-severity 8.0
+ * @id py/templated-taint-namebased-cwe-089
+ * @tags security
+ *       external/cwe/cwe-089
+ */
+
+import python
+import semmle.python.dataflow.new.DataFlow
+import semmle.python.dataflow.new.TaintTracking
+import semmle.python.dataflow.new.RemoteFlowSources
+import semmle.python.Concepts
+
+/** A call whose attribute name (obj.NAME(...)) or bare name (NAME(...)) is in `names`. */
+bindingset[names]
+private predicate callNameIn(DataFlow::CallCfgNode call, string names) {
+  call.getFunction().(DataFlow::AttrRead).getAttributeName() = names
+  or
+  call.getFunction().asExpr().(Name).getId() = names
+}
+
+module TaintCfg implements DataFlow::ConfigSig {
+  predicate isSource(DataFlow::Node node) {
+    // Default realistic source: any remote/user-controlled input.
+    node instanceof RemoteFlowSource
+    or
+    // Agent-supplied name-based sources: the result of calling NAME(...).
+    exists(DataFlow::CallCfgNode call |
+      callNameIn(call, ["__never_matches__"])
+    |
+      node = call
+    )
+  }
+
+  predicate isBarrier(DataFlow::Node node) {
+    // Agent-supplied name-based sanitizers (barriers). Empty -> sentinel ->
+    // matches nothing. NB: the new dataflow API uses isBarrier, not isSanitizer.
+    exists(DataFlow::CallCfgNode call |
+      callNameIn(call, ["__never_matches__"])
+    |
+      node = call
+    )
+  }
+
+  predicate isSink(DataFlow::Node node) {
+    // Agent-supplied name-based sinks: any argument of a call to NAME(...).
+    exists(DataFlow::CallCfgNode call |
+      callNameIn(call, ["sql"])
+    |
+      node = call.getArg(_)
+    )
+  }
+}
+
+module TaintFlow = TaintTracking::Global<TaintCfg>;
+
+import TaintFlow::PathGraph
+
+from TaintFlow::PathNode source, TaintFlow::PathNode sink
+where TaintFlow::flowPath(source, sink)
+select sink.getNode(), source, sink,
+  "User input flows to a name-based sink from $@.", source.getNode(), "this source"
